@@ -3,12 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ</title>
+  <title>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ পরীক্ষা</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
   
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
   <script type="module">
@@ -40,7 +49,16 @@
     let totalSeconds = examDuration;
     let timerInterval = null;
     let userAnswers = {};
+    let currentQuestionOrder = [];
+    let examStartTimeMs = null;
 
+    // সার্ভার টাইম সিঙ্ক ভেরিয়েবল
+    let serverTimeOffset = 0;
+    let initialPerfNow = performance.now();
+    let initialServerTime = null;
+    let isDeviceClockTampered = false;
+
+    const totalQuestions = 30;
     const correctAnswers = {
       q1: "C", q2: "B", q3: "C", q4: "A", q5: "B",
       q6: "C", q7: "B", q8: "C", q9: "B", q10: "B",
@@ -50,17 +68,94 @@
       q26: "A", q27: "A", q28: "B", q29: "B", q30: "B"
     };
 
+    // পরীক্ষার সময়সূচি (ঢাকা টাইম +06:00)
     const EXAM_START_TIME = new Date("2026-10-15T12:00:00+06:00").getTime();
-    const EXAM_END_TIME = new Date("2026-10-15T12:10:00+06:00").getTime();
-    const PRACTICE_START_TIME = new Date("2026-10-15T12:30:00+06:00").getTime();
+    const EXAM_END_TIME = new Date("2026-10-15T14:00:00+06:00").getTime();
+    const PRACTICE_START_TIME = new Date("2026-10-15T20:00:00+06:00").getTime();
+
+    function toBanglaDigit(str) {
+      const bngDigits = ['০','১','২','৩','৪','৫','৬','৭','৮','৯'];
+      return str.toString().replace(/\d/g, d => bngDigits[d]);
+    }
+
+    function formatTimeTaken(seconds) {
+      if (seconds === undefined || seconds === null || isNaN(seconds)) return '-';
+      const totalSec = Math.max(0, Math.floor(Number(seconds)));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return toBanglaDigit(`${m > 0 ? m + ' মি: ' : ''}${s} সে:`);
+    }
+
+    // ফায়ারবেস ও অনলাইন সার্ভার থেকে আসল ঢাকা টাইম বের করা
+    async function syncWithFirebaseServerTime(uid) {
+      let realTime = null;
+
+      // ১. ফায়ারবেস সার্ভার টাইমস্ট্যাম্প চেক (সবচেয়ে নিরাপদ)
+      if (uid) {
+        try {
+          const timeRef = doc(db, 'artifacts', appId, 'users', uid, 'data', 'server_time_sync');
+          await setDoc(timeRef, { now: serverTimestamp() }, { merge: true });
+          const snap = await getDoc(timeRef);
+          if (snap.exists() && snap.data().now) {
+            realTime = snap.data().now.toDate().getTime();
+          }
+        } catch (err) {
+          console.error("Firebase time sync error:", err);
+        }
+      }
+
+      // ২. ব্যাকআপ হিসেবে WorldTimeAPI / TimeAPI (Asia/Dhaka)
+      if (!realTime) {
+        try {
+          const res = await fetch('https://timeapi.io/api/Time/current/zone?timeZone=Asia/Dhaka');
+          if (res.ok) {
+            const data = await res.json();
+            realTime = new Date(data.dateTime + "+06:00").getTime();
+          }
+        } catch (e) {}
+      }
+
+      if (!realTime) {
+        try {
+          const res = await fetch('https://worldtimeapi.org/api/timezone/Asia/Dhaka');
+          if (res.ok) {
+            const data = await res.json();
+            realTime = new Date(data.datetime).getTime();
+          }
+        } catch (e) {}
+      }
+
+      if (realTime) {
+        const localNow = Date.now();
+        serverTimeOffset = realTime - localNow;
+        initialServerTime = realTime;
+        initialPerfNow = performance.now();
+
+        // যদি লোকাল ডিভাইসের ঘড়ি ৫ মিনিটের বেশি উল্টাপাল্টা থাকে
+        if (Math.abs(serverTimeOffset) > 5 * 60 * 1000) {
+          isDeviceClockTampered = true;
+        }
+        return realTime;
+      }
+      return null;
+    }
+
+    // সবসময় আসল সার্ভার সময় রিটার্ন করবে (ডিভাইস ঘড়ি পাল্টালেও কাজ করবে না)
+    function getTrueServerTime() {
+      if (initialServerTime !== null) {
+        const elapsedSinceSync = performance.now() - initialPerfNow;
+        return Math.floor(initialServerTime + elapsedSinceSync);
+      }
+      return Date.now() + serverTimeOffset;
+    }
 
     function getExamMode() {
-      const now = Date.now();
+      const now = getTrueServerTime();
       if (now < EXAM_START_TIME) return "UPCOMING";
       if (now >= EXAM_START_TIME && now <= EXAM_END_TIME) return "LIVE";
       if (now > EXAM_END_TIME && now < PRACTICE_START_TIME) return "CLOSED";
       if (now >= PRACTICE_START_TIME) return "PRACTICE";
-      return "UNKNOWN";
+      return "LIVE";
     }
 
     function showScreen(screenId) {
@@ -79,91 +174,193 @@
       document.getElementById('customModal').style.display = 'none';
     };
 
-    window.addEventListener('DOMContentLoaded', async () => {
-      // Theme Initialization
-      const savedTheme = localStorage.getItem('apexTheme') || 'light';
-      document.documentElement.setAttribute('data-theme', savedTheme);
-
-      const mode = getExamMode();
-
-      if (mode === "UPCOMING") {
-        showScreen('profileSetupScreen');
-        document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card" style="text-align: center;">
-            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.5rem;">⏳ পরীক্ষা এখনও শুরু হয়নি!</h3>
-            <p style="color: var(--text-muted); font-weight: 600;">লাইভ পরীক্ষা শুরু হবে: ১৫ অক্টোবর, ২০২৬ দুপুর ১২টায়।</p>
-          </div>`;
-        return;
-      }
-
-      if (mode === "CLOSED") {
-        showScreen('profileSetupScreen');
-        document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card" style="text-align: center;">
-            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.5rem;">🛑 লাইভ পরীক্ষা শেষ!</h3>
-            <p style="color: var(--text-muted); font-weight: 600;">প্র্যাকটিস এক্সাম আজ রাত ৮ টায় শুরু হবে। অনুগ্রহ করে অপেক্ষা করুন।</p>
-          </div>`;
-        return;
-      }
-
-      if (mode === "PRACTICE") {
-        showScreen('profileSetupScreen');
-        document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card" style="text-align: center;">
-            <h3 style="color:var(--primary-color); margin-bottom: 10px; font-size: 1.5rem;">✅ প্র্যাকটিস এক্সাম চালু আছে</h3>
-            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.95rem;">এই প্র্যাকটিস এক্সামে ক্লাউডে কোনো ডেটা সেভ হবে না এবং আপনি যতবার খুশি পরীক্ষা দিতে পারবেন।</p>
-            <button class="btn btn-primary" onclick="startPracticeExam()">প্র্যাকটিস শুরু করুন 🚀</button>
-          </div>`;
-        return; 
-      }
-
-      onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          currentUser = user;
-          checkExistingProfile(user.uid);
-        } else {
-          try {
-            const cred = await signInAnonymously(auth);
-            currentUser = cred.user;
-            showScreen('profileSetupScreen');
-          } catch (err) {
-            console.error("Auth Error:", err);
-            showScreen('profileSetupScreen');
-          }
-        }
-      });
-
-      document.getElementById('quizForm').addEventListener('change', updateAnsweredCountAndSaveDraft);
-    });
-
-    // Theme Toggle Function
     window.toggleTheme = function() {
       const currentTheme = document.documentElement.getAttribute('data-theme');
       const newTheme = currentTheme === 'light' ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', newTheme);
       localStorage.setItem('apexTheme', newTheme);
+    };
+
+    // প্রশ্ন শাফল (Shuffle) করার ফাংশন
+    function generateShuffledOrder() {
+      const arr = [];
+      for (let i = 1; i <= totalQuestions; i++) {
+        arr.push('q' + i);
+      }
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
     }
 
-    async function updateAnsweredCountAndSaveDraft() {
-      let count = 0;
-      userAnswers = {};
-
-      for (let i = 1; i <= 30; i++) {
-        const selected = document.querySelector(`input[name="q${i}"]:checked`);
-        if (selected) {
-          count++;
-          userAnswers['q' + i] = selected.value;
+    function applyQuestionOrderToDOM(orderArray) {
+      const form = document.getElementById('quizForm');
+      orderArray.forEach((qKey, index) => {
+        const qNum = qKey.replace('q', '');
+        const card = document.getElementById(`qCard-${qNum}`);
+        if (card) {
+          const numSpan = card.querySelector('.q-serial-num');
+          if (numSpan) {
+            numSpan.innerText = `${toBanglaDigit(index + 1)}.`;
+          }
+          form.appendChild(card);
         }
+      });
+    }
+
+    // OMR লক করার ফাংশন (একবার দাগ দিলে আর পরিবর্তন করা যাবে না)
+    function lockQuestionOMR(qKey, selectedVal) {
+      const qNum = qKey.replace('q', '');
+      const card = document.getElementById(`qCard-${qNum}`);
+      if (!card) return;
+
+      const inputs = card.querySelectorAll(`input[name="${qKey}"]`);
+      inputs.forEach(input => {
+        const label = input.closest('.option-label');
+        if (input.value === selectedVal) {
+          input.checked = true;
+          if (label) label.classList.add('omr-selected');
+        } else {
+          if (label) label.classList.remove('omr-selected');
+        }
+        input.disabled = true; // লক করে দেওয়া হলো
+      });
+
+      card.classList.add('omr-locked-card');
+      const lockBadge = card.querySelector('.omr-status-badge');
+      if (lockBadge) {
+        lockBadge.style.display = 'inline-block';
       }
-      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ${count}/৩০`;
+    }
+
+    function resetAllQuestionsOMR() {
+      for (let i = 1; i <= totalQuestions; i++) {
+        const card = document.getElementById(`qCard-${i}`);
+        if (!card) continue;
+        card.classList.remove('omr-locked-card');
+        const lockBadge = card.querySelector('.omr-status-badge');
+        if (lockBadge) lockBadge.style.display = 'none';
+
+        const inputs = card.querySelectorAll(`input[name="q${i}"]`);
+        inputs.forEach(input => {
+          input.disabled = false;
+          input.checked = false;
+          const label = input.closest('.option-label');
+          if (label) label.classList.remove('omr-selected');
+        });
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      const savedTheme = localStorage.getItem('apexTheme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+
+      // MCQ সিলেক্ট ও OMR লক লিসেনার (লাইভ এবং প্র্যাকটিস উভয় মোডেই কাজ করবে)
+      document.getElementById('quizForm').addEventListener('change', handleOptionSelect);
+
+      // প্রথমে লোডিং মেসেজ দেখানো
+      showScreen('profileSetupScreen');
+      const setupContainer = document.getElementById('profileSetupScreen');
+      const originalSetupHTML = setupContainer.innerHTML;
+      setupContainer.innerHTML = `
+        <div class="card" style="text-align: center;">
+          <h3 style="color:var(--primary-color); margin-bottom: 10px;">🔄 ফায়ারবেস সার্ভারের সময় যাচাই করা হচ্ছে...</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন।</p>
+        </div>`;
+
+      // ফায়ারবেস অথেনটিকেশন ও সার্ভার টাইম সিঙ্ক
+      try {
+        const cred = await signInAnonymously(auth);
+        currentUser = cred.user;
+      } catch (err) {
+        console.error("Auth Error:", err);
+      }
+
+      const syncedTime = await syncWithFirebaseServerTime(currentUser ? currentUser.uid : null);
+      if (!syncedTime) {
+        setupContainer.innerHTML = `
+          <div class="card" style="text-align: center;">
+            <h3 style="color:var(--danger-color); margin-bottom: 10px;">⚠️ সার্ভার সময় যাচাই করা যায়নি!</h3>
+            <p style="color: var(--text-muted); font-weight: 600;">অনুগ্রহ করে ইন্টারনেট কানেকশন চেক করে পেজটি রিলোড দিন।</p>
+          </div>`;
+        return;
+      }
 
       const mode = getExamMode();
-      if (mode === "LIVE" && currentUser) {
+      const tamperNotice = isDeviceClockTampered ? `
+        <div style="background: rgba(239,68,68,0.12); border: 1px solid var(--danger-color); color: var(--danger-color); padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.85rem; font-weight: 700;">
+          🕵️ ভাই মজা করেন কেন? আপনার ডিভাইসের ঘড়ির টাইম পাল্টানো হয়েছে! ফায়ারবেস সার্ভারের আসল ঢাকা টাইম দিয়ে আপনাকে ট্র্যাক করা হচ্ছে।
+        </div>` : '';
+
+      if (mode === "UPCOMING") {
+        setupContainer.innerHTML = `
+          <div class="card" style="text-align: center;">
+            ${tamperNotice}
+            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.4rem;">⏳ পরীক্ষা এখনও শুরু হয়নি!</h3>
+            <p style="color: var(--text-muted); font-weight: 600; margin-bottom: 12px;">লাইভ পরীক্ষা শুরু হবে: ১৫ অক্টোবর ২০২৬, দুপুর ১২:০০ টায় (ঢাকা টাইম)।</p>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">ডিভাইসের টাইম পরিবর্তন করে পরীক্ষায় প্রবেশ করা যাবে না।</p>
+          </div>`;
+        return;
+      }
+
+      if (mode === "CLOSED") {
+        setupContainer.innerHTML = `
+          <div class="card" style="text-align: center;">
+            ${tamperNotice}
+            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.4rem;">🛑 লাইভ পরীক্ষা শেষ!</h3>
+            <p style="color: var(--text-muted); font-weight: 600;">প্র্যাকটিস এক্সাম আজ রাত ৮:০০ টায় (ঢাকা টাইম) চালু হবে। অনুগ্রহ করে অপেক্ষা করুন।</p>
+          </div>`;
+        return;
+      }
+
+      if (mode === "PRACTICE") {
+        setupContainer.innerHTML = `
+          <div class="card" style="text-align: center;">
+            ${tamperNotice}
+            <h3 style="color:var(--primary-color); margin-bottom: 10px; font-size: 1.4rem;">✅ প্র্যাকটিস এক্সাম চালু আছে</h3>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.92rem;">প্র্যাকটিস এক্সামে ক্লাউডে কোনো ডেটা সেভ হবে না, প্রতিবার প্রশ্ন শাফল হবে এবং যতবার খুশি পরীক্ষা দিতে পারবেন।</p>
+            <button class="btn btn-primary" onclick="startPracticeExam()">প্র্যাকটিস শুরু করুন 🚀</button>
+          </div>`;
+        return;
+      }
+
+      // যদি LIVE মোড হয়
+      setupContainer.innerHTML = originalSetupHTML;
+      if (isDeviceClockTampered) {
+        showModal("⚠️ আপনার ডিভাইসের সময় ভুল আছে! তবে চিন্তা নেই, ফায়ারবেস সার্ভারের আসল সময় অনুযায়ী আপনার পরীক্ষা পরিচালিত হবে।");
+      }
+      if (currentUser) {
+        await checkExistingProfile(currentUser.uid);
+      }
+    });
+
+    // অপশন সিলেক্ট করার সাথে সাথে OMR লক + কাউন্টার আপডেট + ড্রাফট সেভ
+    async function handleOptionSelect(e) {
+      const target = e.target;
+      if (!target || target.type !== 'radio') return;
+
+      const qKey = target.name;
+      const selectedValue = target.value;
+
+      // সাথে সাথে উত্তর মেমরিতে সেভ ও OMR লক
+      userAnswers[qKey] = selectedValue;
+      lockQuestionOMR(qKey, selectedValue);
+
+      // কাউন্টার আপডেট
+      const answeredCount = Object.keys(userAnswers).length;
+      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ${toBanglaDigit(answeredCount)}/${toBanglaDigit(totalQuestions)}`;
+
+      // শুধুমাত্র LIVE মোডে ফায়ারবেসে ড্রাফট সেভ হবে
+      if (getExamMode() === "LIVE" && currentUser) {
         try {
           const draftRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'draft_answers');
-          await setDoc(draftRef, { answers: userAnswers }, { merge: true });
-        } catch (e) {
-          console.error("Draft save error", e);
+          await setDoc(draftRef, { 
+            answers: userAnswers,
+            questionOrder: currentQuestionOrder
+          }, { merge: true });
+        } catch (err) {
+          console.error("Draft save error:", err);
         }
       }
     }
@@ -179,20 +376,35 @@
           const examSnap = await getDoc(examRef);
           
           if (examSnap.exists() && examSnap.data().score !== undefined) {
-            showResultPage(examSnap.data().score, "LIVE");
+            const savedData = examSnap.data();
+            const draftRef = doc(db, 'artifacts', appId, 'users', uid, 'data', 'draft_answers');
+            const draftSnap = await getDoc(draftRef);
+            if (draftSnap.exists()) {
+              userAnswers = draftSnap.data().answers || {};
+              currentQuestionOrder = draftSnap.data().questionOrder || generateShuffledOrder();
+            } else {
+              currentQuestionOrder = generateShuffledOrder();
+            }
+            showResultPage(savedData.score, "LIVE", savedData.timeTaken);
           } else {
-            startExam();
+            await startExam();
           }
         } else {
           showScreen('profileSetupScreen');
         }
       } catch (e) {
-        console.error("Profile check error", e);
+        console.error("Profile check error:", e);
         showScreen('profileSetupScreen');
       }
     }
 
     window.submitProfileAndStart = async function() {
+      await syncWithFirebaseServerTime(currentUser ? currentUser.uid : null);
+      if (getExamMode() !== "LIVE") {
+        showModal("⚠️ পরীক্ষার নির্ধারিত সময় এখন নয়! পেজটি রিলোড করুন।");
+        return;
+      }
+
       const name = document.getElementById('studentNameInput').value.trim();
       const college = document.getElementById('collegeNameInput').value.trim();
 
@@ -205,16 +417,19 @@
         const profileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'profile');
         userProfile = { name, college };
         await setDoc(profileRef, userProfile);
-        startExam();
+        await startExam();
       } catch (e) {
         showModal("তথ্য সংরক্ষণ করতে সমস্যা হয়েছে: " + e.message);
       }
     };
 
+    // লাইভ পরীক্ষা শুরু
     async function startExam() {
       warningCount = 0;
       userAnswers = {};
+      resetAllQuestionsOMR();
 
+      const nowServer = getTrueServerTime();
       const examRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'exam_status');
       const examSnap = await getDoc(examRef);
 
@@ -222,34 +437,49 @@
       if (examSnap.exists() && examSnap.data().startTime) {
         startTime = examSnap.data().startTime.toDate().getTime();
       } else {
-        startTime = Date.now();
+        startTime = nowServer;
         await setDoc(examRef, { startTime: serverTimestamp() }, { merge: true });
       }
+      examStartTimeMs = startTime;
 
+      // ড্রাফট উত্তর ও পূর্বে শাফল করা অর্ডার লোড করা
       const draftRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'draft_answers');
       const draftSnap = await getDoc(draftRef);
       if (draftSnap.exists()) {
         userAnswers = draftSnap.data().answers || {};
-        for (let key in userAnswers) {
-          const val = userAnswers[key];
-          const input = document.querySelector(`input[name="${key}"][value="${val}"]`);
-          if (input) input.checked = true;
+        currentQuestionOrder = draftSnap.data().questionOrder || [];
+      }
+
+      if (!currentQuestionOrder || currentQuestionOrder.length !== totalQuestions) {
+        currentQuestionOrder = generateShuffledOrder();
+        await setDoc(draftRef, { questionOrder: currentQuestionOrder }, { merge: true });
+      }
+
+      // ডমে শাফলড প্রশ্ন সাজানো এবং আগের দাগানো উত্তরগুলো OMR লক করা
+      applyQuestionOrderToDOM(currentQuestionOrder);
+      for (let qKey in userAnswers) {
+        if (userAnswers[qKey]) {
+          lockQuestionOMR(qKey, userAnswers[qKey]);
         }
       }
 
-      const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+      const elapsedTime = Math.floor((nowServer - startTime) / 1000);
       totalSeconds = examDuration - elapsedTime;
+
+      // লাইভ পরীক্ষার শেষ সময় কাছে চলে আসলে টাইমার অ্যাডজাস্ট করা
+      const remainingUntilEnd = Math.floor((EXAM_END_TIME - nowServer) / 1000);
+      if (remainingUntilEnd < totalSeconds) {
+        totalSeconds = remainingUntilEnd;
+      }
 
       if (totalSeconds <= 0) {
         await autoSubmitFromDraft();
         return;
       }
 
-      let count = 0;
-      for (let i = 1; i <= 30; i++) {
-        if (document.querySelector(`input[name="q${i}"]:checked`)) count++;
-      }
-      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ${count}/৩০`;
+      const count = Object.keys(userAnswers).length;
+      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ${toBanglaDigit(count)}/${toBanglaDigit(totalQuestions)}`;
+      document.getElementById('warningText').style.display = 'inline-block';
 
       enableAntiCheat();
       showScreen('examArea');
@@ -257,17 +487,19 @@
       startTimer();
     }
 
+    // প্র্যাকটিস পরীক্ষা শুরু (বারবার দেওয়া যাবে + প্রশ্ন শাফল হবে)
     window.startPracticeExam = function() {
       warningCount = 0;
       userAnswers = {};
       totalSeconds = examDuration;
-      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: 0/৩০`;
-      document.getElementById('warningText').style.display = 'none';
+      examStartTimeMs = getTrueServerTime();
 
-      for (let i = 1; i <= 30; i++) {
-        const options = document.querySelectorAll(`input[name="q${i}"]`);
-        options.forEach(opt => opt.disabled = false);
-      }
+      resetAllQuestionsOMR();
+      currentQuestionOrder = generateShuffledOrder();
+      applyQuestionOrderToDOM(currentQuestionOrder);
+
+      document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ০/${toBanglaDigit(totalQuestions)}`;
+      document.getElementById('warningText').style.display = 'none';
 
       showScreen('examArea');
       if (window.MathJax) MathJax.typesetPromise();
@@ -275,19 +507,18 @@
     };
 
     function enableAntiCheat() {
-      const mode = getExamMode();
-      if (mode === "PRACTICE") return;
+      if (getExamMode() === "PRACTICE") return;
 
       document.onvisibilitychange = () => {
         if (document.hidden && document.getElementById('examArea').style.display !== 'none') {
           warningCount++;
-          document.getElementById('warningText').innerText = `ট্যাব পরিবর্তন: ${warningCount}/২`;
+          document.getElementById('warningText').innerText = `ট্যাব পরিবর্তন: ${toBanglaDigit(warningCount)}/২`;
           
           if (warningCount >= 2) {
             showModal("⚠️ সতর্কতা! একাধিকবার ট্যাব পরিবর্তন করায় পরীক্ষা স্বয়ংক্রিয়ভাবে জমা হয়েছে!");
             submitExam(true);
           } else {
-            showModal(`⚠️ সতর্কবার্তা (${warningCount}/২): পরীক্ষা চলাকালীন ট্যাব পরিবর্তন করা নিষেধ!`);
+            showModal(`⚠️ সতর্কবার্তা (${toBanglaDigit(warningCount)}/২): পরীক্ষা চলাকালীন ট্যাব পরিবর্তন করা নিষেধ!`);
           }
         }
       };
@@ -317,18 +548,21 @@
         
         if (draftSnap.exists()) {
           userAnswers = draftSnap.data().answers || {};
+          currentQuestionOrder = draftSnap.data().questionOrder || generateShuffledOrder();
         }
 
         let score = 0;
-        for (let i = 1; i <= 30; i++) {
+        for (let i = 1; i <= totalQuestions; i++) {
           const qKey = 'q' + i;
           if (userAnswers[qKey] === correctAnswers[qKey]) {
             score++;
           }
         }
 
+        const timeTaken = examDuration;
+
         const examRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'exam_status');
-        await setDoc(examRef, { score: score, timestamp: serverTimestamp(), autoSubmitted: true }, { merge: true });
+        await setDoc(examRef, { score: score, timeTaken: timeTaken, timestamp: serverTimestamp(), autoSubmitted: true }, { merge: true });
 
         const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', currentUser.uid);
         await setDoc(lbRef, {
@@ -336,10 +570,11 @@
           name: userProfile ? userProfile.name : "পরীক্ষার্থী",
           college: userProfile ? userProfile.college : "অজানা",
           score: score,
+          timeTaken: timeTaken,
           timestamp: serverTimestamp()
         });
 
-        showResultPage(score, "LIVE");
+        showResultPage(score, "LIVE", timeTaken);
       } catch (e) { console.error("Auto Submit Error:", e); }
     }
 
@@ -348,24 +583,22 @@
       document.onvisibilitychange = null;
 
       let score = 0;
-      userAnswers = {};
-
-      for (let i = 1; i <= 30; i++) {
+      for (let i = 1; i <= totalQuestions; i++) {
         const qKey = 'q' + i;
-        const selected = document.querySelector(`input[name="${qKey}"]:checked`);
-        userAnswers[qKey] = selected ? selected.value : null;
-
-        if (selected && selected.value === correctAnswers[qKey]) {
+        if (userAnswers[qKey] && userAnswers[qKey] === correctAnswers[qKey]) {
           score++;
         }
       }
 
       const mode = getExamMode();
+      const nowServer = getTrueServerTime();
+      const elapsedByClock = examStartTimeMs ? Math.floor((nowServer - examStartTimeMs) / 1000) : (examDuration - totalSeconds);
+      const timeTaken = Math.max(1, Math.min(examDuration, elapsedByClock));
 
       if (mode === "LIVE" && currentUser && userProfile) {
         try {
           const examRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'exam_status');
-          await setDoc(examRef, { score: score, timestamp: serverTimestamp(), terminated: isTerminated }, { merge: true });
+          await setDoc(examRef, { score: score, timeTaken: timeTaken, timestamp: serverTimestamp(), terminated: isTerminated }, { merge: true });
 
           const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', currentUser.uid);
           await setDoc(lbRef, {
@@ -373,17 +606,19 @@
             name: userProfile.name,
             college: userProfile.college,
             score: score,
+            timeTaken: timeTaken,
             timestamp: serverTimestamp()
           });
-        } catch(err) {}
+        } catch(err) { console.error("Save Error:", err); }
       }
 
-      showResultPage(score, mode);
+      showResultPage(score, mode, timeTaken);
     };
 
-    function showResultPage(score, mode) {
+    function showResultPage(score, mode, timeTaken) {
       showScreen('resultArea');
-      document.getElementById('scoreDisplayVal').innerText = score;
+      document.getElementById('scoreDisplayVal').innerText = toBanglaDigit(score);
+      document.getElementById('userTimeTakenVal').innerText = formatTimeTaken(timeTaken);
       
       if (mode === "PRACTICE") {
         document.getElementById('retakeBtn').style.display = 'inline-block';
@@ -401,12 +636,10 @@
     }
 
     window.retakePracticeExam = function() {
-      document.getElementById('quizForm').reset();
-      userAnswers = {};
-      const reviewContainer = document.getElementById('reviewTabContent');
-      reviewContainer.innerHTML = '';
+      document.getElementById('reviewTabContent').innerHTML = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       startPracticeExam(); 
-    }
+    };
 
     window.switchTab = function(tabName) {
       if (tabName === 'leaderboard') {
@@ -423,25 +656,42 @@
       }
     };
 
+    // লিডারবোর্ড লজিক: ১. নম্বর বেশি -> ২. কম সময় -> ৩. আগে সাবমিট
     function loadLeaderboard() {
       const lbRef = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
       onSnapshot(lbRef, (snapshot) => {
         let lbData = [];
         snapshot.forEach(doc => lbData.push(doc.data()));
-        lbData.sort((a, b) => b.score - a.score);
+        
+        lbData.sort((a, b) => {
+          const scoreA = Number(a.score) || 0;
+          const scoreB = Number(b.score) || 0;
+          if (scoreB !== scoreA) return scoreB - scoreA;
+
+          const timeA = (a.timeTaken !== undefined && a.timeTaken !== null) ? Number(a.timeTaken) : Infinity;
+          const timeB = (b.timeTaken !== undefined && b.timeTaken !== null) ? Number(b.timeTaken) : Infinity;
+          if (timeA !== timeB) return timeA - timeB;
+
+          const tA = a.timestamp && a.timestamp.toDate ? a.timestamp.toDate().getTime() : Infinity;
+          const tB = b.timestamp && b.timestamp.toDate ? b.timestamp.toDate().getTime() : Infinity;
+          return tA - tB;
+        });
 
         const tbody = document.getElementById('leaderboardBody');
         tbody.innerHTML = '';
         let myRank = '-';
 
         if(lbData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color:var(--text-muted);">এখনো কেউ পরীক্ষা দেয়নি।</td></tr>';
-            return;
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; color:var(--text-muted);">এখনো কেউ পরীক্ষা দেয়নি।</td></tr>';
+          return;
         }
 
         lbData.forEach((row, index) => {
           if (currentUser && row.uid === currentUser.uid) {
             myRank = index + 1;
+            if (row.timeTaken !== undefined) {
+              document.getElementById('userTimeTakenVal').innerText = formatTimeTaken(row.timeTaken);
+            }
           }
 
           let tr = document.createElement('tr');
@@ -452,43 +702,70 @@
           else if(index === 1) medal = "🥈 ";
           else if(index === 2) medal = "🥉 ";
 
+          const formattedTime = formatTimeTaken(row.timeTaken);
+
           tr.innerHTML = `
-            <td style="text-align: center;"><div class="rank-badge">${medal}${index + 1}</div></td>
-            <td style="font-weight: 600;">${row.name}</td>
+            <td style="text-align: center;"><div class="rank-badge">${medal}${toBanglaDigit(index + 1)}</div></td>
+            <td style="font-weight: 700;">${row.name}</td>
             <td style="font-size: 0.85rem; color:var(--text-muted);">${row.college}</td>
-            <td class="lb-score">${row.score}</td>
+            <td class="lb-score">${toBanglaDigit(row.score)}</td>
+            <td style="text-align: center;"><span class="time-pill">⏱️ ${formattedTime}</span></td>
           `;
           tbody.appendChild(tr);
         });
 
-        document.getElementById('userRankVal').innerText = myRank !== '-' ? `#${myRank}` : '-';
+        document.getElementById('userRankVal').innerText = myRank !== '-' ? `#${toBanglaDigit(myRank)}` : '-';
       });
     }
 
-    // নতুন রিভিউ লেআউট লজিক
+    // স্টুডেন্ট যে শাফলড অর্ডারে পরীক্ষা দিয়েছে, ঠিক সেই অর্ডারেই রিভিউ দেখানো হবে
     function renderAnswerReview() {
       const reviewContainer = document.getElementById('reviewTabContent');
       reviewContainer.innerHTML = '';
 
-      for (let i = 1; i <= 30; i++) {
-        const qKey = 'q' + i;
-        const origCard = document.getElementById(`qCard-${i}`);
-        if(!origCard) continue;
+      if (!currentQuestionOrder || currentQuestionOrder.length !== totalQuestions) {
+        currentQuestionOrder = [];
+        for (let i = 1; i <= totalQuestions; i++) currentQuestionOrder.push('q' + i);
+      }
+
+      currentQuestionOrder.forEach((qKey, index) => {
+        const qNum = qKey.replace('q', '');
+        const origCard = document.getElementById(`qCard-${qNum}`);
+        if(!origCard) return;
 
         const cloneCard = origCard.cloneNode(true);
+        cloneCard.classList.remove('omr-locked-card');
+        const badge = cloneCard.querySelector('.omr-status-badge');
+        if (badge) badge.style.display = 'none';
+
+        const numSpan = cloneCard.querySelector('.q-serial-num');
+        if (numSpan) numSpan.innerText = `${toBanglaDigit(index + 1)}.`;
+
         const userAns = userAnswers[qKey];
         const correctAns = correctAnswers[qKey];
 
         const options = cloneCard.querySelectorAll('input[type="radio"]');
-        options.forEach(input => input.disabled = true); // রেডিও বাটন ডিসেবল করা হলো
+        options.forEach(input => {
+          input.disabled = true;
+          const label = input.closest('.option-label');
+          label.classList.remove('omr-selected');
+
+          if (input.value === correctAns) {
+            label.classList.add('correct-option');
+          }
+          if (userAns && input.value === userAns) {
+            input.checked = true;
+            if (userAns !== correctAns) {
+              label.classList.add('wrong-option');
+            }
+          }
+        });
 
         const solBox = cloneCard.querySelector('.solution-notes');
-        
         const isCorrect = userAns === correctAns;
         const userAnsColor = isCorrect ? 'var(--success-color)' : 'var(--danger-color)';
         const displayUserAns = userAns ? userAns : "কোনো উত্তর দেননি";
 
-        // নতুন এক্সপ্লেনেশন বক্স ডিজাইন
         const customReviewHTML = `
           <div class="review-details-box">
             <div class="review-stat">
@@ -500,19 +777,20 @@
               <strong style="color: var(--success-color);">${correctAns}</strong>
             </div>
             <div class="review-explanation">
-              ${solBox.innerHTML}
+              <span class="blue-heading">ব্যাখ্যা:</span> ${solBox ? solBox.innerHTML : ''}
             </div>
           </div>
         `;
         
-        solBox.outerHTML = customReviewHTML;
+        if (solBox) solBox.outerHTML = customReviewHTML;
         reviewContainer.appendChild(cloneCard);
-      }
+      });
+
+      if (window.MathJax) MathJax.typesetPromise();
     }
   </script>
 
   <style>
-    /* Theme Variables */
     :root {
       --bg-main: #f1f5f9;
       --bg-card: #ffffff;
@@ -535,7 +813,7 @@
       --bg-card: #1e293b;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --primary-color: #eab308; /* Yellow btn from image */
+      --primary-color: #eab308;
       --btn-text: #000000;
       --border-color: #334155;
       --success-color: #22c55e;
@@ -550,81 +828,111 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Hind Siliguri', sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.6; padding: 10px; transition: background 0.3s, color 0.3s; }
     
-    /* Fixed overflow issue for sticky to work */
     .container { max-width: 900px; margin: 0 auto; min-height: 85vh; position: relative; }
     
-    /* Header matches Apex Tracker Topbar style */
-    .header-bar { background: var(--header-bg); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 12px 12px 0 0; box-shadow: var(--shadow-sm); margin-bottom: 20px;}
-    .header-title { font-size: 1.4rem; font-weight: 700; color: var(--header-text); display: flex; align-items: center; gap: 10px;}
-    .theme-btn { background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: 0.3s;}
-    
-    .screen-section { padding: 10px; }
-    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 30px; box-shadow: var(--shadow-sm); max-width: 450px; margin: 0 auto;}
+    .header-bar { background: var(--header-bg); border: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 12px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .header-title { font-size: 1.3rem; font-weight: 700; color: var(--header-text); display: flex; align-items: center; gap: 10px; }
+    .theme-btn { background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px; font-family: inherit; }
+
+    .exam-banner { background: var(--bg-card); border: 1px solid var(--border-color); padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
+    .exam-banner h1 { font-size: 1.4rem; font-weight: 700; color: var(--text-main); margin-bottom: 4px; }
+    .exam-banner p { font-size: 0.9rem; color: var(--text-muted); }
+
+    .screen-section { padding: 5px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-sm); max-width: 460px; margin: 0 auto; }
     
     .form-group { margin-bottom: 16px; text-align: left; }
     .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: var(--text-main); }
     .form-group input { width: 100%; padding: 12px; background: var(--input-bg); border: 1.5px solid var(--border-color); color: var(--text-main); border-radius: 8px; font-family: inherit; font-size: 0.95rem; outline: none; }
     .form-group input:focus { border-color: var(--primary-color); }
     
-    .btn { padding: 12px 20px; font-size: 1rem; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; width: 100%; margin-top: 10px; transition: 0.3s;}
+    .btn { padding: 12px 20px; font-size: 1rem; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; width: 100%; margin-top: 10px; font-family: inherit; transition: 0.2s; }
     .btn-primary { background: var(--primary-color); color: var(--btn-text); }
     .btn-primary:hover { opacity: 0.9; transform: translateY(-2px); }
 
-    /* Sticky Timer Bar - Fixed! */
+    /* Sticky Timer Bar */
     .timer-bar { 
       position: sticky; 
-      top: 0; 
+      top: 10px; 
       background: var(--bg-card); 
-      border-bottom: 2px solid var(--border-color); 
-      padding: 12px 20px; 
+      border: 2px solid var(--primary-color); 
+      padding: 12px 18px; 
       display: flex; 
       flex-wrap: wrap; 
       gap: 10px; 
       justify-content: space-between; 
       align-items: center; 
-      z-index: 1000; /* Ensures it stays on top */
+      z-index: 1000; 
       border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.18);
       margin-bottom: 20px;
     }
     .timer-box { font-size: 1.15rem; font-weight: 700; color: var(--danger-color); background: var(--bg-main); padding: 4px 12px; border-radius: 20px; border: 1px solid var(--danger-color); }
     .warning-badge { font-size: 0.85rem; background: var(--bg-main); color: var(--danger-color); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--danger-color); font-weight: 600; }
     .answered-badge { font-size: 0.85rem; background: var(--bg-main); color: var(--primary-color); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--primary-color); font-weight: 700; }
 
-    .mcq-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
-    .question-title { font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 15px; }
+    .mcq-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); transition: 0.2s; }
+    .omr-locked-card { border-color: var(--primary-color); }
+    .question-header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 15px; }
+    .question-title { font-size: 1.05rem; font-weight: 700; color: var(--text-main); }
+    .omr-status-badge { display: none; font-size: 0.75rem; background: var(--bg-main); color: var(--primary-color); border: 1px solid var(--primary-color); padding: 2px 8px; border-radius: 12px; font-weight: 700; white-space: nowrap; }
+
     .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 580px) { .options-grid { grid-template-columns: 1fr; } }
     
     .option-label { display: flex; align-items: center; padding: 12px; background: var(--bg-main); border: 1.5px solid var(--border-color); border-radius: 8px; cursor: pointer; font-size: 0.95rem; color: var(--text-main); font-weight: 600; transition: 0.2s; }
     .option-label:hover { border-color: var(--primary-color); }
     .option-label input { margin-right: 10px; accent-color: var(--primary-color); transform: scale(1.1); }
+    .option-label.omr-selected { border-color: var(--primary-color); background: rgba(234, 179, 8, 0.12); font-weight: 700; }
 
-    .solution-notes { display: none; } /* Hidden initially, replaced in JS */
+    .correct-option { border-color: var(--success-color) !important; background-color: rgba(34, 197, 94, 0.12) !important; }
+    .wrong-option { border-color: var(--danger-color) !important; background-color: rgba(239, 68, 68, 0.12) !important; }
+
+    .solution-notes { display: none; }
     
-    /* New Review Box Styles */
     .review-details-box { margin-top: 15px; padding: 15px; background: var(--review-bg); border-radius: 8px; border: 1px solid var(--border-color); }
-    .review-stat { margin-bottom: 8px; font-weight: 600; font-size: 1rem; }
-    .review-explanation { border-top: 1px dashed var(--border-color); padding-top: 12px; margin-top: 10px; font-family: 'Kalam', 'Hind Siliguri', cursive; color: var(--text-muted); font-size: 1rem; }
+    .review-stat { margin-bottom: 6px; font-weight: 600; font-size: 1rem; }
+    .review-explanation { border-top: 1px dashed var(--border-color); padding-top: 10px; margin-top: 10px; font-family: 'Kalam', 'Hind Siliguri', cursive; color: var(--text-main); font-size: 1rem; }
     .highlight { background-color: rgba(234, 179, 8, 0.2); padding: 0 4px; border-radius: 3px; color: var(--text-main); font-weight: 600; }
-    .blue-heading { color: var(--primary-color); font-weight: 700; font-family: 'Hind Siliguri', sans-serif;}
+    .blue-heading { color: var(--primary-color); font-weight: 700; font-family: 'Hind Siliguri', sans-serif; }
 
-    .result-summary { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 30px; text-align: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
+    .result-summary { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; text-align: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
     .score-badge { font-size: 2.5rem; font-weight: 800; color: var(--primary-color); }
+    .result-meta { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 10px; font-size: 0.95rem; font-weight: 600; }
 
     .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-    .tab-btn { flex: 1; padding: 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; color: var(--text-muted); transition: 0.3s;}
+    .tab-btn { flex: 1; padding: 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; color: var(--text-muted); transition: 0.3s; }
     .tab-btn.active { background: var(--primary-color); color: var(--btn-text); border-color: var(--primary-color); }
 
-    .lb-container { border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; background: var(--bg-card); box-shadow: var(--shadow-sm); }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
+    .lb-container { border: 1px solid var(--border-color); border-radius: 12px; overflow-x: auto; background: var(--bg-card); box-shadow: var(--shadow-sm); }
+    table { width: 100%; border-collapse: collapse; text-align: left; min-width: 520px; }
     th, td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
     th { background: var(--bg-main); font-weight: 700; color: var(--text-muted); font-size: 0.85rem; }
-    .my-row { background-color: rgba(234, 179, 8, 0.1) !important; }
-    .lb-score { color: var(--primary-color); font-weight: 700; font-size: 1.1rem; text-align: center;}
-    .rank-badge { display: inline-block; background: var(--bg-main); padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; border: 1px solid var(--border-color);}
+    .my-row { background-color: rgba(234, 179, 8, 0.15) !important; }
+    .lb-score { color: var(--primary-color); font-weight: 800; font-size: 1.15rem; text-align: center; }
+    .rank-badge { display: inline-block; background: var(--bg-main); padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; border: 1px solid var(--border-color); }
+    .time-pill { display: inline-block; background: var(--bg-main); color: var(--text-main); padding: 4px 10px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; border: 1px solid var(--border-color); }
 
-    .footer-notice { text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; margin-top: 20px;}
+    .footer-notice { 
+      text-align: center; 
+      padding: 16px 20px; 
+      background: linear-gradient(135deg, #090a0f 0%, #171922 50%, #050608 100%); 
+      color: #e2e8f0; 
+      font-size: 0.9rem; 
+      font-weight: 600; 
+      border-top: 2px solid #d4af37;
+      border-radius: 12px;
+      margin-top: 25px;
+    }
+    .golden-text {
+      background: linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 800;
+      font-size: 1.05rem;
+      display: inline-block;
+    }
+
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); display: none; justify-content: center; align-items: center; z-index: 9999; backdrop-filter: blur(4px); }
     .modal-content { background: var(--bg-card); padding: 25px; border-radius: 16px; max-width: 380px; text-align: center; width: 90%; border: 1px solid var(--border-color); box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
   </style>
@@ -640,20 +948,24 @@
   </div>
 
   <div class="container">
-    <!-- Apex Tracker Style Header -->
     <div class="header-bar">
       <div class="header-title">
-        <span style="font-size: 1.8rem; color: var(--primary-color);">⚡</span>
+        <span style="font-size: 1.6rem; color: var(--primary-color);">⚡</span>
         HSC Cloud Exam Hub
       </div>
       <button class="theme-btn" onclick="toggleTheme()">🌓 Theme</button>
     </div>
 
+    <div class="exam-banner">
+      <h1>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ পরীক্ষা</h1>
+      <p>৩০টি গুরুত্বপূর্ণ বোর্ড ও ভর্তি পরীক্ষার প্রশ্ন (OMR লক ও অটো-শাফল যুক্ত)</p>
+    </div>
+
     <!-- ১. নাম ও কলেজ ইনপুট স্ক্রিন -->
     <div id="profileSetupScreen" class="screen-section">
       <div class="card">
-        <h3 style="color: var(--text-main); margin-bottom: 8px;">পরীক্ষার্থীর তথ্য</h3>
-        <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.85rem;">লিডারবোর্ডের জন্য আপনার সঠিক নাম ও কলেজের নাম দিন।</p>
+        <h3 style="color: var(--text-main); margin-bottom: 8px; text-align: center;">পরীক্ষার্থীর তথ্য</h3>
+        <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.85rem; text-align: center;">লিডারবোর্ডের জন্য আপনার সঠিক নাম ও কলেজের নাম দিন।</p>
         <div class="form-group">
           <label>পরীক্ষার্থীর নাম:</label>
           <input type="text" id="studentNameInput" placeholder="পূর্ণ নাম লিখুন" />
@@ -668,458 +980,454 @@
 
     <!-- ২. পরীক্ষা নেওয়ার স্ক্রিন -->
     <div id="examArea" style="display: none;">
-      <!-- Sticky Timer Bar (Fixed Overflow Issue) -->
       <div class="timer-bar">
-        <div class="answered-badge" id="answeredBadge">উত্তর দেওয়া হয়েছে: 0/৩০</div>
-        <div class="warning-badge" id="warningText">ট্যাব পরিবর্তন: 0/২</div>
+        <div class="answered-badge" id="answeredBadge">উত্তর দেওয়া হয়েছে: ০/৩০</div>
+        <div class="warning-badge" id="warningText">ট্যাব পরিবর্তন: ০/২</div>
         <div class="timer-box" id="timeDisplay">25:00</div>
       </div>
 
       <div class="questions-container">
         <form id="quizForm">
-          <!-- প্রশ্ন ১ -->
+          
           <div class="mcq-card" id="qCard-1">
-            <div class="question-title">১. তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে নিচের কোনটি ব্যবহৃত হয়?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১.</span> তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে নিচের কোনটি ব্যবহৃত হয়?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q1" value="A"> সেলসিয়াস স্কেল</label>
               <label class="option-label"><input type="radio" name="q1" value="B"> ফারেনহাইট স্কেল</label>
               <label class="option-label"><input type="radio" name="q1" value="C"> কেলভিন স্কেল</label>
               <label class="option-label"><input type="radio" name="q1" value="D"> র্যাংকিন স্কেল</label>
             </div>
-            <div class="solution-notes">
-              <span class="blue-heading">বিশ্লেষণ:</span> SI এককে তাপমাত্রার মৌলিক একক হলো <span class="highlight">কেলভিন (K)</span>। বৈজ্ঞানিক ও আন্তর্জাতিক গবেষণায় তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে কেলভিন স্কেল ব্যবহার করা হয়।
-            </div>
+            <div class="solution-notes">SI এককে তাপমাত্রার মৌলিক একক হলো <span class="highlight">কেলভিন (K)</span>। বৈজ্ঞানিক ও আন্তর্জাতিক গবেষণায় তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে কেলভিন স্কেল ব্যবহার করা হয়।</div>
           </div>
 
-          <!-- প্রশ্ন ২ -->
           <div class="mcq-card" id="qCard-2">
-            <div class="question-title">২. তাপমাত্রার ফারেনহাইট ও সেলসিয়াস স্কেলে কোন পাঠে মান একই নির্দেশ করে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২.</span> তাপমাত্রার ফারেনহাইট ও সেলসিয়াস স্কেলে কোন পাঠে মান একই নির্দেশ করে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q2" value="A"> \( 40^\circ \)</label>
               <label class="option-label"><input type="radio" name="q2" value="B"> \( -40^\circ \)</label>
               <label class="option-label"><input type="radio" name="q2" value="C"> \( 0^\circ \)</label>
               <label class="option-label"><input type="radio" name="q2" value="D"> \( 100^\circ \)</label>
             </div>
-            <div class="solution-notes">
-              <span class="blue-heading">সম্পর্ক:</span> \( \frac{C}{5} = \frac{F-32}{9} \)<br/>
-              ধরি, \( C = F = x \)। \( \Rightarrow \frac{x}{5} = \frac{x-32}{9} \Rightarrow 9x = 5x - 160 \Rightarrow 4x = -160 \Rightarrow x = \mathbf{-40^\circ} \)।
-            </div>
+            <div class="solution-notes">সম্পর্ক: \( \frac{C}{5} = \frac{F-32}{9} \)<br/>ধরি, \( C = F = x \)। \( \Rightarrow \frac{x}{5} = \frac{x-32}{9} \Rightarrow 9x = 5x - 160 \Rightarrow 4x = -160 \Rightarrow x = \mathbf{-40^\circ} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ৩ -->
           <div class="mcq-card" id="qCard-3">
-            <div class="question-title">৩. কোনো বস্তুর তাপমাত্রা \( 25^\circ\text{C} \) বৃদ্ধি পেলে ফারেনহাইট স্কেলে তা কত বৃদ্ধি পাবে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৩.</span> কোনো বস্তুর তাপমাত্রা \( 25^\circ\text{C} \) বৃদ্ধি পেলে ফারেনহাইট স্কেলে তা কত বৃদ্ধি পাবে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q3" value="A"> \( 25^\circ\text{F} \)</label>
               <label class="option-label"><input type="radio" name="q3" value="B"> \( 32^\circ\text{F} \)</label>
               <label class="option-label"><input type="radio" name="q3" value="C"> \( 45^\circ\text{F} \)</label>
               <label class="option-label"><input type="radio" name="q3" value="D"> \( 77^\circ\text{F} \)</label>
             </div>
-            <div class="solution-notes">
-              তাপমাত্রার পরিবর্তনের ক্ষেত্রে: \( \frac{\Delta C}{5} = \frac{\Delta F}{9} \)<br/>
-              \( \Delta F = \frac{9}{5} \times \Delta C = \frac{9}{5} \times 25 = \mathbf{45^\circ\text{F}} \) ।
-            </div>
+            <div class="solution-notes">তাপমাত্রার পরিবর্তনের ক্ষেত্রে: \( \frac{\Delta C}{5} = \frac{\Delta F}{9} \)<br/>\( \Delta F = \frac{9}{5} \times \Delta C = \frac{9}{5} \times 25 = \mathbf{45^\circ\text{F}} \) ।</div>
           </div>
 
-          <!-- প্রশ্ন ৪ -->
           <div class="mcq-card" id="qCard-4">
-            <div class="question-title">৪. তাপগতিবিদ্যার শূন্যতম সূত্রের (Zeroth Law) ভিত্তি কোনটি?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৪.</span> তাপগতিবিদ্যার শূন্যতম সূত্রের (Zeroth Law) ভিত্তি কোনটি?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q4" value="A"> তাপীয় সমতা</label>
               <label class="option-label"><input type="radio" name="q4" value="B"> কাজের রূপান্তর</label>
               <label class="option-label"><input type="radio" name="q4" value="C"> এনট্রপির বৃদ্ধি</label>
               <label class="option-label"><input type="radio" name="q4" value="D"> শক্তির নিত্যতা</label>
             </div>
-            <div class="solution-notes">
-              <span class="blue-heading">মূলনীতি:</span> যদি দুটি বস্তু পৃথকভাবে তৃতীয় কোনো বস্তুর সাথে তাপীয় সমতায় থাকে, তবে তারা পরস্পরের সাথেও তাপীয় সমতায় থাকবে। এই সূত্র থেকেই <span class="highlight">তাপমাত্রার ধারণার</span> উৎপত্তি।
-            </div>
+            <div class="solution-notes">যদি দুটি বস্তু পৃথকভাবে তৃতীয় কোনো বস্তুর সাথে তাপীয় সমতায় থাকে, তবে তারা পরস্পরের সাথেও তাপীয় সমতায় থাকবে। এই সূত্র থেকেই <span class="highlight">তাপমাত্রার ধারণার</span> উৎপত্তি।</div>
           </div>
 
-          <!-- প্রশ্ন ৫ -->
           <div class="mcq-card" id="qCard-5">
-            <div class="question-title">৫. পানির ত্রৈধ বিন্দুর (Triple Point of Water) চাপ কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৫.</span> পানির ত্রৈধ বিন্দুর (Triple Point of Water) চাপ কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q5" value="A"> 1 atm</label>
               <label class="option-label"><input type="radio" name="q5" value="B"> 4.58 mm Hg</label>
               <label class="option-label"><input type="radio" name="q5" value="C"> 76 cm Hg</label>
               <label class="option-label"><input type="radio" name="q5" value="D"> 0.006 atm</label>
             </div>
-            <div class="solution-notes">
-              পানির ত্রৈধ বিন্দুতে বরফ, পানি ও জলীয় বাষ্প সাম্যাবস্থায় থাকে। এর তাপমাত্রা \( 273.16\text{ K} \) এবং চাপ <span class="highlight">4.58 mm Hg</span> (বা \( 611.65\text{ Pa} \))।
-            </div>
+            <div class="solution-notes">পানির ত্রৈধ বিন্দুতে বরফ, পানি ও জলীয় বাষ্প সাম্যাবস্থায় থাকে। এর তাপমাত্রা \( 273.16\text{ K} \) এবং চাপ <span class="highlight">4.58 mm Hg</span> (বা \( 611.65\text{ Pa} \))।</div>
           </div>
 
-          <!-- প্রশ্ন ৬ -->
           <div class="mcq-card" id="qCard-6">
-            <div class="question-title">৬. তাপগতিবিদ্যার প্রথম সূত্র মূলত কোনটির সংরক্ষণশীলতা নীতি নির্দেশ করে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৬.</span> তাপগতিবিদ্যার প্রথম সূত্র মূলত কোনটির সংরক্ষণশীলতা নীতি নির্দেশ করে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q6" value="A"> ভর</label>
               <label class="option-label"><input type="radio" name="q6" value="B"> ভরবেগ</label>
               <label class="option-label"><input type="radio" name="q6" value="C"> শক্তি</label>
               <label class="option-label"><input type="radio" name="q6" value="D"> চার্জ</label>
             </div>
-            <div class="solution-notes">
-              সূত্রানুযায়ী: \( dQ = dU + dW \)। এটি সিস্টেমের <span class="highlight">শক্তির সংরক্ষণশীলতা নীতি</span> প্রকাশ করে।
-            </div>
+            <div class="solution-notes">সূত্রানুযায়ী: \( dQ = dU + dW \)। এটি সিস্টেমের <span class="highlight">শক্তির সংরক্ষণশীলতা নীতি</span> প্রকাশ করে।</div>
           </div>
 
-          <!-- প্রশ্ন ৭ -->
           <div class="mcq-card" id="qCard-7">
-            <div class="question-title">৭. একটি আবদ্ধ সিস্টেমে 500 J তাপ সরবরাহ করা হলো এবং সিস্টেম দ্বারা 200 J কাজ সম্পাদিত হলো। অভ্যন্তরীণ শক্তির পরিবর্তন কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৭.</span> একটি আবদ্ধ সিস্টেমে 500 J তাপ সরবরাহ করা হলো এবং সিস্টেম দ্বারা 200 J কাজ সম্পাদিত হলো। অভ্যন্তরীণ শক্তির পরিবর্তন কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q7" value="A"> 700 J</label>
               <label class="option-label"><input type="radio" name="q7" value="B"> 300 J</label>
               <label class="option-label"><input type="radio" name="q7" value="C"> -300 J</label>
               <label class="option-label"><input type="radio" name="q7" value="D"> 2.5 J</label>
             </div>
-            <div class="solution-notes">
-              \( dQ = dU + dW \Rightarrow dU = dQ - dW = 500\text{ J} - 200\text{ J} = \mathbf{300\text{ J}} \)।
-            </div>
+            <div class="solution-notes">\( dQ = dU + dW \Rightarrow dU = dQ - dW = 500\text{ J} - 200\text{ J} = \mathbf{300\text{ J}} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ৮ -->
           <div class="mcq-card" id="qCard-8">
-            <div class="question-title">৮. সমোষ্ণ প্রক্রিয়ায় (Isothermal Process) নিচের কোনটি ধ্রুব থাকে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৮.</span> সমোষ্ণ প্রক্রিয়ায় (Isothermal Process) নিচের কোনটি ধ্রুব থাকে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q8" value="A"> চাপ</label>
               <label class="option-label"><input type="radio" name="q8" value="B"> আয়তন</label>
               <label class="option-label"><input type="radio" name="q8" value="C"> অভ্যন্তরীণ শক্তি</label>
               <label class="option-label"><input type="radio" name="q8" value="D"> তাপের পরিমাণ</label>
             </div>
-            <div class="solution-notes">
-              আদর্শ গ্যাসের অভ্যন্তরীণ শক্তি শুধুমাত্র তাপমাত্রার ওপর নির্ভর করে (\( U \propto T \))। সমোষ্ণ প্রক্রিয়ায় তাপমাত্রা ধ্রুব থাকায় <span class="highlight">অভ্যন্তরীণ শক্তি স্থির থাকে</span> (\( \Delta U = 0 \))।
-            </div>
+            <div class="solution-notes">আদর্শ গ্যাসের অভ্যন্তরীণ শক্তি শুধুমাত্র তাপমাত্রার ওপর নির্ভর করে (\( U \propto T \))। সমোষ্ণ প্রক্রিয়ায় তাপমাত্রা ধ্রুব থাকায় <span class="highlight">অভ্যন্তরীণ শক্তি স্থির থাকে</span> (\( \Delta U = 0 \))।</div>
           </div>
 
-          <!-- প্রশ্ন ৯ -->
           <div class="mcq-card" id="qCard-9">
-            <div class="question-title">৯. রুদ্ধতাপীয় প্রক্রিয়ায় (Adiabatic Process) পরিবেশের সাথে সিস্টেমের কোনটি বিনিময় হয় না?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৯.</span> রুদ্ধতাপীয় প্রক্রিয়ায় (Adiabatic Process) পরিবেশের সাথে সিস্টেমের কোনটি বিনিময় হয় না?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q9" value="A"> তাপমাত্রা</label>
               <label class="option-label"><input type="radio" name="q9" value="B"> তাপ</label>
               <label class="option-label"><input type="radio" name="q9" value="C"> চাপ</label>
               <label class="option-label"><input type="radio" name="q9" value="D"> কাজ</label>
             </div>
-            <div class="solution-notes">
-              রুদ্ধতাপীয় প্রক্রিয়ায় সিস্টেম থেকে বাহিরে বা বাহির থেকে ভেতরে <span class="highlight">তাপ আদান-প্রদান হয় না</span> (\( dQ = 0 \))।
-            </div>
+            <div class="solution-notes">রুদ্ধতাপীয় প্রক্রিয়ায় সিস্টেম থেকে বাহিরে বা বাহির থেকে ভেতরে <span class="highlight">তাপ আদান-প্রদান হয় না</span> (\( dQ = 0 \))।</div>
           </div>
 
-          <!-- প্রশ্ন ১০ -->
           <div class="mcq-card" id="qCard-10">
-            <div class="question-title">১০. একটি দ্বি-পরমাণুক গ্যাসের ক্ষেত্রে \( \gamma (C_p / C_v) \) এর মান কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১০.</span> একটি দ্বি-পরমাণুক গ্যাসের ক্ষেত্রে \( \gamma (C_p / C_v) \) এর মান কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q10" value="A"> 1.67</label>
               <label class="option-label"><input type="radio" name="q10" value="B"> 1.40</label>
               <label class="option-label"><input type="radio" name="q10" value="C"> 1.33</label>
               <label class="option-label"><input type="radio" name="q10" value="D"> 1.00</label>
             </div>
-            <div class="solution-notes">
-              এক-পরমাণুক গ্যাস: \( \gamma = 1.67 \)<br/>
-              <span class="highlight">দ্বি-পরমাণুক গ্যাস: \( \gamma = 1.40 \)</span><br/>
-              বহুপ পরমাণুক গ্যাস: \( \gamma = 1.33 \)
-            </div>
+            <div class="solution-notes">এক-পরমাণুক গ্যাস: \( \gamma = 1.67 \), <span class="highlight">দ্বি-পরমাণুক গ্যাস: \( \gamma = 1.40 \)</span>, বহু-পরমাণুক গ্যাস: \( \gamma = 1.33 \)।</div>
           </div>
 
-          <!-- প্রশ্ন ১১ -->
           <div class="mcq-card" id="qCard-11">
-            <div class="question-title">১১. সমায়তন প্রক্রিয়ায় (Isochoric Process) সম্পাদিত কাজ (\( dW \)) কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১১.</span> সমায়তন প্রক্রিয়ায় (Isochoric Process) সম্পাদিত কাজ (\( dW \)) কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q11" value="A"> \( P\Delta V \)</label>
               <label class="option-label"><input type="radio" name="q11" value="B"> \( nR\Delta T \)</label>
               <label class="option-label"><input type="radio" name="q11" value="C"> 0</label>
               <label class="option-label"><input type="radio" name="q11" value="D"> \( \infty \)</label>
             </div>
-            <div class="solution-notes">
-              কাজ \( dW = P \cdot dV \)। সমায়তন প্রক্রিয়ায় আয়তনের পরিবর্তন \( dV = 0 \), ফলে কৃতকাজ <span class="highlight">\( dW = 0 \)</span> হয়।
-            </div>
+            <div class="solution-notes">কাজ \( dW = P \cdot dV \)। সমায়তন প্রক্রিয়ায় আয়তনের পরিবর্তন \( dV = 0 \), ফলে কৃতকাজ <span class="highlight">\( dW = 0 \)</span> হয়।</div>
           </div>
 
-          <!-- প্রশ্ন ১২ -->
           <div class="mcq-card" id="qCard-12">
-            <div class="question-title">১২. রুদ্ধতাপীয় সম্প্রসারণে (Adiabatic Expansion) গ্যাসের তাপমাত্রা কেমন হয়?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১২.</span> রুদ্ধতাপীয় সম্প্রসারণে (Adiabatic Expansion) গ্যাসের তাপমাত্রা কেমন হয়?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q12" value="A"> বৃদ্ধি পায়</label>
               <label class="option-label"><input type="radio" name="q12" value="B"> হ্রাস পায়</label>
               <label class="option-label"><input type="radio" name="q12" value="C"> অপরিবর্তিত থাকে</label>
               <label class="option-label"><input type="radio" name="q12" value="D"> শূন্য হয়</label>
             </div>
-            <div class="solution-notes">
-              রুদ্ধতাপীয় প্রক্রিয়ায় \( dQ = 0 \Rightarrow dU = -dW \)। সম্প্রসারণে কাজ ধনাত্মক তাই অভ্যন্তরীণ শক্তি কমে যায় এবং <span class="highlight">তাপমাত্রা হ্রাস পায়</span>।
-            </div>
+            <div class="solution-notes">রুদ্ধতাপীয় প্রক্রিয়ায় \( dQ = 0 \Rightarrow dU = -dW \)। সম্প্রসারণে কাজ ধনাত্মক তাই অভ্যন্তরীণ শক্তি কমে যায় এবং <span class="highlight">তাপমাত্রা হ্রাস পায়</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ১৩ -->
           <div class="mcq-card" id="qCard-13">
-            <div class="question-title">১৩. দ্বি-পরমাণুক গ্যাসের জন্য সমোষ্ণ লেখের নতি (Slope) এবং রুদ্ধতাপীয় লেখের নতির অনুপাত কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৩.</span> দ্বি-পরমাণুক গ্যাসের জন্য সমোষ্ণ লেখের নতি (Slope) এবং রুদ্ধতাপীয় লেখের নতির অনুপাত কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q13" value="A"> 1 : 1.4</label>
               <label class="option-label"><input type="radio" name="q13" value="B"> 1.4 : 1</label>
               <label class="option-label"><input type="radio" name="q13" value="C"> 1 : 1.67</label>
               <label class="option-label"><input type="radio" name="q13" value="D"> 1 : 1</label>
             </div>
-            <div class="solution-notes">
-              রুদ্ধতাপীয় রেখার ঢাল = \( \gamma \times \) সমোষ্ণ রেখার ঢাল।<br/>
-              \( \frac{\text{সমোষ্ণ ঢাল}}{\text{রুদ্ধতাপীয় ঢাল}} = \frac{1}{\gamma} = \frac{1}{1.4} \Rightarrow \mathbf{1 : 1.4} \)।
-            </div>
+            <div class="solution-notes">রুদ্ধতাপীয় রেখার ঢাল = \( \gamma \times \) সমোষ্ণ রেখার ঢাল। \( \frac{\text{সমোষ্ণ ঢাল}}{\text{রুদ্ধতাপীয় ঢাল}} = \frac{1}{\gamma} = \frac{1}{1.4} \Rightarrow \mathbf{1 : 1.4} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ১৪ -->
           <div class="mcq-card" id="qCard-14">
-            <div class="question-title">১৪. কার্নো ইঞ্জিনের দক্ষতা (\( \eta \)) ১০০% হতে হলে গ্রাহকের তাপমাত্রা (\( T_2 \)) কত হতে হবে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৪.</span> কার্নো ইঞ্জিনের দক্ষতা (\( \eta \)) ১০০% হতে হলে গ্রাহকের তাপমাত্রা (\( T_2 \)) কত হতে হবে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q14" value="A"> \( 0^\circ\text{C} \)</label>
               <label class="option-label"><input type="radio" name="q14" value="B"> \( 100^\circ\text{C} \)</label>
               <label class="option-label"><input type="radio" name="q14" value="C"> 0 K</label>
               <label class="option-label"><input type="radio" name="q14" value="D"> 273 K</label>
             </div>
-            <div class="solution-notes">
-              \( \eta = \left(1 - \frac{T_2}{T_1}\right) \times 100\% \)। দক্ষতা ১০০% বা ১ হতে হলে \( \frac{T_2}{T_1} = 0 \Rightarrow \mathbf{T_2 = 0\text{ K}} \) হতে হবে।
-            </div>
+            <div class="solution-notes">\( \eta = \left(1 - \frac{T_2}{T_1}\right) \times 100\% \)। দক্ষতা ১০০% হতে হলে \( \frac{T_2}{T_1} = 0 \Rightarrow \mathbf{T_2 = 0\text{ K}} \) হতে হবে।</div>
           </div>
 
-          <!-- প্রশ্ন ১৫ -->
           <div class="mcq-card" id="qCard-15">
-            <div class="question-title">১৫. কার্নো চক্রে মোট কয়টি ধাপ থাকে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৫.</span> কার্নো চক্রে মোট কয়টি ধাপ থাকে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q15" value="A"> ২টি</label>
               <label class="option-label"><input type="radio" name="q15" value="B"> ৩টি</label>
               <label class="option-label"><input type="radio" name="q15" value="C"> ৪টি</label>
               <label class="option-label"><input type="radio" name="q15" value="D"> ৬টি</label>
             </div>
-            <div class="solution-notes">
-              ৪টি ধাপ হলো: ১. সমোষ্ণ সম্প্রসারণ ২. রুদ্ধতাপীয় সম্প্রসারণ ৩. সমোষ্ণ সংকোচন ৪. রুদ্ধতাপীয় সংকোচন।
-            </div>
+            <div class="solution-notes">৪টি ধাপ হলো: ১. সমোষ্ণ সম্প্রসারণ ২. রুদ্ধতাপীয় সম্প্রসারণ ৩. সমোষ্ণ সংকোচন ৪. রুদ্ধতাপীয় সংকোচন।</div>
           </div>
 
-          <!-- প্রশ্ন ১৬ -->
           <div class="mcq-card" id="qCard-16">
-            <div class="question-title">১৬. একটি ইঞ্জিনের উৎসের তাপমাত্রা 600 K এবং তাপ গ্রাহকের তাপমাত্রা 300 K হলে এর কর্মদক্ষতা কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৬.</span> একটি ইঞ্জিনের উৎসের তাপমাত্রা 600 K এবং তাপ গ্রাহকের তাপমাত্রা 300 K হলে এর কর্মদক্ষতা কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q16" value="A"> 25%</label>
               <label class="option-label"><input type="radio" name="q16" value="B"> 33.33%</label>
               <label class="option-label"><input type="radio" name="q16" value="C"> 50%</label>
               <label class="option-label"><input type="radio" name="q16" value="D"> 75%</label>
             </div>
-            <div class="solution-notes">
-              \( \eta = \left(1 - \frac{300}{600}\right) \times 100\% = (1 - 0.5) \times 100\% = \mathbf{50\%} \)।
-            </div>
+            <div class="solution-notes">\( \eta = \left(1 - \frac{300}{600}\right) \times 100\% = (1 - 0.5) \times 100\% = \mathbf{50\%} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ১৭ -->
           <div class="mcq-card" id="qCard-17">
-            <div class="question-title">১৭. রেফ্রিজারেটর বা হিমায়ক কোন নীতিতে কাজ করে?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৭.</span> রেফ্রিজারেটর বা হিমায়ক কোন নীতিতে কাজ করে?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q17" value="A"> বিপরীতমুখী কার্নো ইঞ্জিন</label>
               <label class="option-label"><input type="radio" name="q17" value="B"> ডিজেল ইঞ্জিন</label>
               <label class="option-label"><input type="radio" name="q17" value="C"> অটো ইঞ্জিন</label>
               <label class="option-label"><input type="radio" name="q17" value="D"> তাপ সরবরাহকারী বয়লার</label>
             </div>
-            <div class="solution-notes">
-              রেফ্রিজারেটর নিম্ন তাপমাত্রার আধার থেকে তাপ শোষণ করে বহিস্থ কাজের সাহায্যে উচ্চ তাপমাত্রার আধারে বর্জন করে। এটি একটি <span class="highlight">বিপরীতমুখী কার্নো চক্র</span>।
-            </div>
+            <div class="solution-notes">রেফ্রিজারেটর নিম্ন তাপমাত্রার আধার থেকে তাপ শোষণ করে বহিস্থ কাজের সাহায্যে উচ্চ তাপমাত্রার আধারে বর্জন করে। এটি একটি <span class="highlight">বিপরীতমুখী কার্নো চক্র</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ১৮ -->
           <div class="mcq-card" id="qCard-18">
-            <div class="question-title">১৮. উৎসের তাপমাত্রা স্থির রেখে কার্নো ইঞ্জিনের দক্ষতা বৃদ্ধি করতে হলে গ্রাহকের তাপমাত্রা—</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৮.</span> উৎসের তাপমাত্রা স্থির রেখে কার্নো ইঞ্জিনের দক্ষতা বৃদ্ধি করতে হলে গ্রাহকের তাপমাত্রা—</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q18" value="A"> বাড়াতে হবে</label>
               <label class="option-label"><input type="radio" name="q18" value="B"> কমাতে হবে</label>
               <label class="option-label"><input type="radio" name="q18" value="C"> স্থির রাখতে হবে</label>
               <label class="option-label"><input type="radio" name="q18" value="D"> দ্বিগুণ করতে হবে</label>
             </div>
-            <div class="solution-notes">
-              \( \eta = 1 - \frac{T_2}{T_1} \)। \( T_1 \) স্থির রেখে \( T_2 \) কমালে \( \frac{T_2}{T_1} \) এর মান কমবে, ফলে <span class="highlight">\( \eta \) বৃদ্ধি পাবে</span>।
-            </div>
+            <div class="solution-notes">\( \eta = 1 - \frac{T_2}{T_1} \)। \( T_1 \) স্থির রেখে \( T_2 \) কমালে \( \frac{T_2}{T_1} \) এর মান কমবে, ফলে <span class="highlight">\( \eta \) বৃদ্ধি পাবে</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ১৯ -->
           <div class="mcq-card" id="qCard-19">
-            <div class="question-title">১৯. সমস্ত প্রত্যাবর্তী প্রক্রিয়ায় (Reversible Process) বিশ্বের মোট এনট্রপি—</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">১৯.</span> সমস্ত প্রত্যাবর্তী প্রক্রিয়ায় (Reversible Process) বিশ্বের মোট এনট্রপি—</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q19" value="A"> বৃদ্ধি পায়</label>
               <label class="option-label"><input type="radio" name="q19" value="B"> হ্রাস পায়</label>
               <label class="option-label"><input type="radio" name="q19" value="C"> অপরিবর্তিত থাকে</label>
               <label class="option-label"><input type="radio" name="q19" value="D"> শূন্য হয়ে যায়</label>
             </div>
-            <div class="solution-notes">
-              প্রত্যাবর্তী চক্রে এনট্রপির পরিবর্তন \( \Delta S = \oint \frac{dQ}{T} = 0 \), অর্থাৎ <span class="highlight">এনট্রপি অপরিবর্তিত থাকে</span>।
-            </div>
+            <div class="solution-notes">প্রত্যাবর্তী চক্রে এনট্রপির পরিবর্তন \( \Delta S = \oint \frac{dQ}{T} = 0 \), অর্থাৎ <span class="highlight">এনট্রপি অপরিবর্তিত থাকে</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ২০ -->
           <div class="mcq-card" id="qCard-20">
-            <div class="question-title">২০. অপ্রত্যাবর্তী প্রক্রিয়ায় (Irreversible Process) এনট্রপি—</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২০.</span> অপ্রত্যাবর্তী প্রক্রিয়ায় (Irreversible Process) এনট্রপি—</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q20" value="A"> সর্বদা হ্রাস পায়</label>
               <label class="option-label"><input type="radio" name="q20" value="B"> সর্বদা বৃদ্ধি পায়</label>
               <label class="option-label"><input type="radio" name="q20" value="C"> অপরিবর্তিত থাকে</label>
               <label class="option-label"><input type="radio" name="q20" value="D"> শূন্য হয়</label>
             </div>
-            <div class="solution-notes">
-              প্রকৃতিতে সংঘটিত সকল স্বতঃস্ফূর্ত বা অপ্রত্যাবর্তী প্রক্রিয়ায় <span class="highlight">এনট্রপি বৃদ্ধি পায়</span> (\( \Delta S > 0 \))।
-            </div>
+            <div class="solution-notes">প্রকৃতিতে সংঘটিত সকল স্বতঃস্ফূর্ত বা অপ্রত্যাবর্তী প্রক্রিয়ায় <span class="highlight">এনট্রপি বৃদ্ধি পায়</span> (\( \Delta S > 0 \))।</div>
           </div>
 
-          <!-- প্রশ্ন ২১ -->
           <div class="mcq-card" id="qCard-21">
-            <div class="question-title">২১. এনট্রপির একক কোনটি?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২১.</span> এনট্রপির একক কোনটি?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q21" value="A"> \( \text{J}\cdot\text{K} \)</label>
               <label class="option-label"><input type="radio" name="q21" value="B"> J/K</label>
               <label class="option-label"><input type="radio" name="q21" value="C"> J/kg</label>
               <label class="option-label"><input type="radio" name="q21" value="D"> \( \text{N/m}^2 \)</label>
             </div>
-            <div class="solution-notes">
-              এনট্রপির পরিবর্তন \( dS = \frac{dQ}{T} \)। তাপের একক জুল (J) এবং তাপমাত্রার একক কেলভিন (K), তাই একক <span class="highlight">J/K</span>।
-            </div>
+            <div class="solution-notes">এনট্রপির পরিবর্তন \( dS = \frac{dQ}{T} \)। তাপের একক জুল (J) এবং তাপমাত্রার একক কেলভিন (K), তাই একক <span class="highlight">J/K</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ২২ -->
           <div class="mcq-card" id="qCard-22">
-            <div class="question-title">২২. পরম শূন্য তাপমাত্রায় কোনো বিশুদ্ধ কেলাসের এনট্রপি কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২২.</span> পরম শূন্য তাপমাত্রায় কোনো বিশুদ্ধ কেলাসের এনট্রপি কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q22" value="A"> অসীম (\( \infty \))</label>
               <label class="option-label"><input type="radio" name="q22" value="B"> 1</label>
               <label class="option-label"><input type="radio" name="q22" value="C"> 0</label>
               <label class="option-label"><input type="radio" name="q22" value="D"> -273</label>
             </div>
-            <div class="solution-notes">
-              তাপগতিবিদ্যার ৩য় সূত্র অনুযায়ী পরম শূন্য তাপমাত্রায় (0 K) অণুগুলোর গতি সম্পূর্ণ থেমে যায়, ফলে <span class="highlight">এনট্রপি শূন্য</span> হয়।
-            </div>
+            <div class="solution-notes">তাপগতিবিদ্যার ৩য় সূত্র অনুযায়ী পরম শূন্য তাপমাত্রায় (0 K) অণুগুলোর গতি সম্পূর্ণ থেমে যায়, ফলে <span class="highlight">এনট্রপি শূন্য</span> হয়।</div>
           </div>
 
-          <!-- প্রশ্ন ২৩ -->
           <div class="mcq-card" id="qCard-23">
-            <div class="question-title">২৩. পদার্থবিজ্ঞানের কোন রাশিকে "বিশৃঙ্খলার পরিমাপক" বলা হয়?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৩.</span> পদার্থবিজ্ঞানের কোন রাশিকে "বিশৃঙ্খলার পরিমাপক" বলা হয়?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q23" value="A"> অভ্যন্তরীণ শক্তি</label>
               <label class="option-label"><input type="radio" name="q23" value="B"> কাজ</label>
               <label class="option-label"><input type="radio" name="q23" value="C"> এনট্রপি</label>
               <label class="option-label"><input type="radio" name="q23" value="D"> এনথালপি</label>
             </div>
-            <div class="solution-notes">
-              <span class="highlight">এনট্রপি</span> হলো কোনো সিস্টেমের অণুগুলোর বিশৃঙ্খলা বা এলোমেলোভাবের পরিমাপক।
-            </div>
+            <div class="solution-notes"><span class="highlight">এনট্রপি</span> হলো কোনো সিস্টেমের অণুগুলোর বিশৃঙ্খলা বা এলোমেলোভাবের পরিমাপক।</div>
           </div>
 
-          <!-- প্রশ্ন ২৪ -->
           <div class="mcq-card" id="qCard-24">
-            <div class="question-title">২৪. \( 0^\circ\text{C} \) তাপমাত্রার 1 kg বরফকে \( 0^\circ\text{C} \) তাপমাত্রার পানিতে পরিণত করলে এনট্রপির পরিবর্তন কত? (\( L_f = 3.36 \times 10^5\text{ J/kg} \))</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৪.</span> \( 0^\circ\text{C} \) তাপমাত্রার 1 kg বরফকে \( 0^\circ\text{C} \) তাপমাত্রার পানিতে পরিণত করলে এনট্রপির পরিবর্তন কত? (\( L_f = 3.36 \times 10^5\text{ J/kg} \))</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q24" value="A"> 1230.77 J/K</label>
               <label class="option-label"><input type="radio" name="q24" value="B"> 336 J/K</label>
               <label class="option-label"><input type="radio" name="q24" value="C"> 0 J/K</label>
               <label class="option-label"><input type="radio" name="q24" value="D"> 1.23 J/K</label>
             </div>
-            <div class="solution-notes">
-              \( dS = \frac{mL_f}{T} = \frac{1 \times 3.36 \times 10^5}{273} \approx \mathbf{1230.77\text{ J/K}} \)।
-            </div>
+            <div class="solution-notes">\( dS = \frac{mL_f}{T} = \frac{1 \times 3.36 \times 10^5}{273} \approx \mathbf{1230.77\text{ J/K}} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ২৫ -->
           <div class="mcq-card" id="qCard-25">
-            <div class="question-title">২৫. \( 27^\circ\text{C} \) তাপমাত্রায় গ্যাসের আয়তন সংকুচিত করে অর্ধেক করা হলে চূড়ান্ত তাপমাত্রা কত? (\( \gamma = 1.4 \))</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৫.</span> \( 27^\circ\text{C} \) তাপমাত্রায় গ্যাসের আয়তন সংকুচিত করে অর্ধেক করা হলে চূড়ান্ত তাপমাত্রা কত? (\( \gamma = 1.4 \))</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q25" value="A"> 395.8 K</label>
               <label class="option-label"><input type="radio" name="q25" value="B"> 300 K</label>
               <label class="option-label"><input type="radio" name="q25" value="C"> 150 K</label>
               <label class="option-label"><input type="radio" name="q25" value="D"> 500 K</label>
             </div>
-            <div class="solution-notes">
-              \( T_1 V_1^{\gamma-1} = T_2 V_2^{\gamma-1} \)<br/>
-              \( T_2 = 300 \times (2)^{0.4} \approx \mathbf{395.85\text{ K}} \) ।
-            </div>
+            <div class="solution-notes">\( T_1 V_1^{\gamma-1} = T_2 V_2^{\gamma-1} \Rightarrow T_2 = 300 \times (2)^{0.4} \approx \mathbf{395.85\text{ K}} \) ।</div>
           </div>
 
-          <!-- প্রশ্ন ২৬ -->
           <div class="mcq-card" id="qCard-26">
-            <div class="question-title">২৬. কার্নো ইঞ্জিনের \( T_1 = 400\text{ K}, T_2 = 300\text{ K} \) এর দক্ষতা \( \eta_1 \)। উভয় তাপমাত্রা 100 K বাড়ালে নতুন দক্ষতা \( \eta_2 \) এর সম্পর্ক কী?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৬.</span> কার্নো ইঞ্জিনের \( T_1 = 400\text{ K}, T_2 = 300\text{ K} \) এর দক্ষতা \( \eta_1 \)। উভয় তাপমাত্রা 100 K বাড়ালে নতুন দক্ষতা \( \eta_2 \) এর সম্পর্ক কী?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q26" value="A"> \( \eta_1 > \eta_2 \)</label>
               <label class="option-label"><input type="radio" name="q26" value="B"> \( \eta_1 < \eta_2 \)</label>
               <label class="option-label"><input type="radio" name="q26" value="C"> \( \eta_1 = \eta_2 \)</label>
               <label class="option-label"><input type="radio" name="q26" value="D"> \( \eta_2 = 2\eta_1 \)</label>
             </div>
-            <div class="solution-notes">
-              \( \eta_1 = 1 - \frac{300}{400} = 25\% \)<br/>
-              \( \eta_2 = 1 - \frac{400}{500} = 20\% \)। অতএব, <span class="highlight">\( \eta_1 > \eta_2 \)</span>।
-            </div>
+            <div class="solution-notes">\( \eta_1 = 1 - \frac{300}{400} = 25\% \) এবং \( \eta_2 = 1 - \frac{400}{500} = 20\% \)। অতএব, <span class="highlight">\( \eta_1 > \eta_2 \)</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ২৭ -->
           <div class="mcq-card" id="qCard-27">
-            <div class="question-title">২৭. সমোষ্ণ সম্প্রসারণের ক্ষেত্রে কৃত কাজের সঠিক সূত্র কোনটি?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৭.</span> সমোষ্ণ সম্প্রসারণের ক্ষেত্রে কৃত কাজের সঠিক সূত্র কোনটি?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q27" value="A"> \( W = nRT \ln\left(\frac{V_2}{V_1}\right) \)</label>
               <label class="option-label"><input type="radio" name="q27" value="B"> \( W = \frac{nR}{\gamma-1}(T_1 - T_2) \)</label>
               <label class="option-label"><input type="radio" name="q27" value="C"> \( W = P(V_2 - V_1) \)</label>
               <label class="option-label"><input type="radio" name="q27" value="D"> W = 0</label>
             </div>
-            <div class="solution-notes">
-              সমোষ্ণ কাজের সূত্র: <span class="highlight">\( W = nRT \ln\left(\frac{V_2}{V_1}\right) \)</span>।
-            </div>
+            <div class="solution-notes">সমোষ্ণ কাজের সূত্র: <span class="highlight">\( W = nRT \ln\left(\frac{V_2}{V_1}\right) \)</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ২৮ -->
           <div class="mcq-card" id="qCard-28">
-            <div class="question-title">২৮. কোনো তাপ ইঞ্জিনের গৃহীত তাপ \( Q_1 = 1000\text{ J} \) এবং বর্জিত তাপ \( Q_2 = 400\text{ J} \) হলে কাজের পরিমাণ কত?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৮.</span> কোনো তাপ ইঞ্জিনের গৃহীত তাপ \( Q_1 = 1000\text{ J} \) এবং বর্জিত তাপ \( Q_2 = 400\text{ J} \) হলে কাজের পরিমাণ কত?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q28" value="A"> 1400 J</label>
               <label class="option-label"><input type="radio" name="q28" value="B"> 600 J</label>
               <label class="option-label"><input type="radio" name="q28" value="C"> 40000 J</label>
               <label class="option-label"><input type="radio" name="q28" value="D"> 2.5 J</label>
             </div>
-            <div class="solution-notes">
-              কাজের মান \( W = Q_1 - Q_2 = 1000\text{ J} - 400\text{ J} = \mathbf{600\text{ J}} \)।
-            </div>
+            <div class="solution-notes">কাজের মান \( W = Q_1 - Q_2 = 1000\text{ J} - 400\text{ J} = \mathbf{600\text{ J}} \)।</div>
           </div>
 
-          <!-- প্রশ্ন ২৯ -->
           <div class="mcq-card" id="qCard-29">
-            <div class="question-title">২৯. রুদ্ধতাপীয় পরিবর্তনের ক্ষেত্রে চাপ (P) এবং তাপমাত্রার (T) মধ্যে সম্পর্ক কোনটি?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">২৯.</span> রুদ্ধতাপীয় পরিবর্তনের ক্ষেত্রে চাপ (P) এবং তাপমাত্রার (T) মধ্যে সম্পর্ক কোনটি?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q29" value="A"> \( PT^\gamma = \text{Constant} \)</label>
               <label class="option-label"><input type="radio" name="q29" value="B"> \( P^{1-\gamma} T^\gamma = \text{Constant} \)</label>
               <label class="option-label"><input type="radio" name="q29" value="C"> \( P^\gamma T^{1-\gamma} = \text{Constant} \)</label>
               <label class="option-label"><input type="radio" name="q29" value="D"> PT = Constant</label>
             </div>
-            <div class="solution-notes">
-              রুদ্ধতাপীয় চাপ-তাপমাত্রা সম্পর্ক: <span class="highlight">\( P^{1-\gamma} T^\gamma = \text{Constant} \)</span>।
-            </div>
+            <div class="solution-notes">রুদ্ধতাপীয় চাপ-তাপমাত্রা সম্পর্ক: <span class="highlight">\( P^{1-\gamma} T^\gamma = \text{Constant} \)</span>।</div>
           </div>
 
-          <!-- প্রশ্ন ৩০ -->
           <div class="mcq-card" id="qCard-30">
-            <div class="question-title">৩০. ১ মোল আদর্শ গ্যাসের তাপমাত্রা 1 K বৃদ্ধি করতে কৃত কাজ কত (সমচাপ প্রক্রিয়ায়)?</div>
+            <div class="question-header-row">
+              <div class="question-title"><span class="q-serial-num">৩০.</span> ১ মোল আদর্শ গ্যাসের তাপমাত্রা 1 K বৃদ্ধি করতে কৃত কাজ কত (সমচাপ প্রক্রিয়ায়)?</div>
+              <span class="omr-status-badge">🔒 OMR লকড</span>
+            </div>
             <div class="options-grid">
               <label class="option-label"><input type="radio" name="q30" value="A"> 1 J</label>
               <label class="option-label"><input type="radio" name="q30" value="B"> R</label>
               <label class="option-label"><input type="radio" name="q30" value="C"> \( C_v \)</label>
               <label class="option-label"><input type="radio" name="q30" value="D"> 0</label>
             </div>
-            <div class="solution-notes">
-              \( dW = P \cdot dV = nR \cdot dT \)<br/>
-              \( n = 1 \) mole এবং \( dT = 1\text{ K} \) বসালে কৃতকাজ = <span class="highlight">R</span> (সার্বজনীন গ্যাস ধ্রুবক)।
-            </div>
+            <div class="solution-notes">\( dW = P \cdot dV = nR \cdot dT \)। \( n = 1 \) mole এবং \( dT = 1\text{ K} \) বসালে কৃতকাজ = <span class="highlight">R</span> (সার্বজনীন গ্যাস ধ্রুবক)।</div>
           </div>
 
         </form>
       </div>
 
       <div style="padding: 20px; text-align: center;">
-        <button class="btn btn-primary" style="max-width: 300px; font-size: 1.1rem; padding: 14px;" onclick="submitExam()">পরীক্ষা জমা দিন</button>
+        <button type="button" class="btn btn-primary" style="max-width: 300px; font-size: 1.1rem; padding: 14px;" onclick="submitExam()">পরীক্ষা জমা দিন</button>
       </div>
     </div>
 
     <!-- ৩. ফলাফল ও রিভিউ স্ক্রিন -->
     <div id="resultArea" class="screen-section" style="display: none;">
       <div class="result-summary">
-        <h3 style="color: var(--text-main); margin-bottom: 5px;">ফলাফল সংরক্ষিত হয়েছে!</h3>
+        <h3 style="color: var(--text-main); margin-bottom: 5px;">পরীক্ষা সম্পন্ন হয়েছে!</h3>
         <p style="color: var(--text-muted); font-size: 0.9rem;">আপনার প্রাপ্ত নম্বর:</p>
-        <div class="score-badge"><span id="scoreDisplayVal">0</span> <span style="font-size: 1.2rem; color: var(--text-muted);">/ ৩০</span></div>
-        <p style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-top: 5px;">আপনার অবস্থান: <span id="userRankVal" style="color: var(--primary-color);">-</span></p>
+        <div class="score-badge"><span id="scoreDisplayVal">০</span> <span style="font-size: 1.2rem; color: var(--text-muted);">/ ৩০</span></div>
+        
+        <div class="result-meta">
+          <div>🏆 আপনার অবস্থান: <span id="userRankVal" style="color: var(--primary-color);">-</span></div>
+          <div>⏱️ সময় লেগেছে: <span id="userTimeTakenVal" style="color: var(--primary-color);">-</span></div>
+        </div>
         
         <button id="retakeBtn" class="btn btn-primary" style="display:none; margin-top: 20px; width: auto;" onclick="retakePracticeExam()">আবার প্র্যাকটিস করুন 🔄</button>
       </div>
@@ -1134,10 +1442,11 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 70px; text-align: center;">র‍্যাংক</th>
+                <th style="width: 75px; text-align: center;">র‍্যাংক</th>
                 <th>নাম</th>
                 <th>কলেজ</th>
                 <th style="text-align: center;">নম্বর</th>
+                <th style="text-align: center;">ব্যয়কৃত সময়</th>
               </tr>
             </thead>
             <tbody id="leaderboardBody">
@@ -1151,10 +1460,10 @@
     </div>
 
     <div class="footer-notice">
-     Developed by Rimit <br>
-     <span style="font-size: 0.8rem; font-weight: 400;">Exam Question: Made by Rimit</span>
+      <span class="golden-text">Developed by Rimit</span> <br>
+      <span class="golden-text">Exam Question: Made by Rimit</span>
     </div>
   </div>
 
 </body>
-</html>
+  </html>
