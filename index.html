@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="bn">
+<html lang="bn" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ পরীক্ষা ও লিডারবোর্ড</title>
+  <title>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +17,6 @@
     import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // ওয়েব অ্যাপের ফায়ারবেস কনফিগারেশন
     const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
       apiKey: "AIzaSyCNW7psMpQaSDE957kA3AnQAFjGNFqHrCo",
       authDomain: "vector-7eda0.firebaseapp.com",
@@ -28,7 +27,6 @@
       measurementId: "G-RCLPV9PMJF"
     };
 
-    // ফায়ারবেস ইনিশিয়ালাইজেশন
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
     const auth = getAuth(app);
@@ -38,7 +36,7 @@
     let currentUser = null;
     let userProfile = null;
     let warningCount = 0;
-    const examDuration = 25 * 60; // ২৫ মিনিট (সেকেন্ডে)
+    const examDuration = 25 * 60; // ২৫ মিনিট
     let totalSeconds = examDuration;
     let timerInterval = null;
     let userAnswers = {};
@@ -52,11 +50,9 @@
       q26: "A", q27: "A", q28: "B", q29: "B", q30: "B"
     };
 
-    // --- পরীক্ষার সময়সূচি নির্ধারণ ---
-    // সময়গুলো এশিয়া/ঢাকা টাইমজোনের ভিত্তিতে দেওয়া হয়েছে
-    const EXAM_START_TIME = new Date("2026-10-15T12:18:00+06:00").getTime();
-    const EXAM_END_TIME = new Date("2026-10-15T12:23:00+06:00").getTime();
-    const PRACTICE_START_TIME = new Date("2026-10-15T12:25:00+06:00").getTime();
+    const EXAM_START_TIME = new Date("2026-10-15T12:00:00+06:00").getTime();
+    const EXAM_END_TIME = new Date("2026-10-15T14:00:00+06:00").getTime();
+    const PRACTICE_START_TIME = new Date("2026-10-15T20:00:00+06:00").getTime();
 
     function getExamMode() {
       const now = Date.now();
@@ -84,15 +80,18 @@
     };
 
     window.addEventListener('DOMContentLoaded', async () => {
+      // Theme Initialization
+      const savedTheme = localStorage.getItem('apexTheme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+
       const mode = getExamMode();
 
-      // সময় অনুযায়ী স্ক্রিন লোড করা
       if (mode === "UPCOMING") {
         showScreen('profileSetupScreen');
         document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card">
-            <h3 style="color:var(--badge-red); margin-bottom: 10px;">⏳ পরীক্ষা এখনও শুরু হয়নি!</h3>
-            <p style="color: #64748b; font-weight: 600;">লাইভ পরীক্ষা শুরু হবে: ১৫ অক্টোবর, ২০২৬ দুপুর ১২:১৮টায়।</p>
+          <div class="card" style="text-align: center;">
+            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.5rem;">⏳ পরীক্ষা এখনও শুরু হয়নি!</h3>
+            <p style="color: var(--text-muted); font-weight: 600;">লাইভ পরীক্ষা শুরু হবে: ১৫ অক্টোবর, ২০২৬ দুপুর ১২টায়।</p>
           </div>`;
         return;
       }
@@ -100,9 +99,9 @@
       if (mode === "CLOSED") {
         showScreen('profileSetupScreen');
         document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card">
-            <h3 style="color:var(--badge-red); margin-bottom: 10px;">🛑 লাইভ পরীক্ষা শেষ!</h3>
-            <p style="color: #64748b; font-weight: 600;">প্র্যাকটিস এক্সাম আজ রাত ১২:২৫ টায় শুরু হবে। অনুগ্রহ করে অপেক্ষা করুন।</p>
+          <div class="card" style="text-align: center;">
+            <h3 style="color:var(--danger-color); margin-bottom: 10px; font-size: 1.5rem;">🛑 লাইভ পরীক্ষা শেষ!</h3>
+            <p style="color: var(--text-muted); font-weight: 600;">প্র্যাকটিস এক্সাম আজ রাত ৮ টায় শুরু হবে। অনুগ্রহ করে অপেক্ষা করুন।</p>
           </div>`;
         return;
       }
@@ -110,15 +109,14 @@
       if (mode === "PRACTICE") {
         showScreen('profileSetupScreen');
         document.getElementById('profileSetupScreen').innerHTML = `
-          <div class="card">
-            <h3 style="color:var(--blue-marker); margin-bottom: 10px;">✅ প্র্যাকটিস এক্সাম চালু আছে</h3>
-            <p style="margin-bottom: 20px; color: #64748b; font-size: 0.9rem;">এই প্র্যাকটিস এক্সামে ক্লাউডে কোনো ডেটা সেভ হবে না এবং আপনি যতবার খুশি পরীক্ষা দিতে পারবেন।</p>
+          <div class="card" style="text-align: center;">
+            <h3 style="color:var(--primary-color); margin-bottom: 10px; font-size: 1.5rem;">✅ প্র্যাকটিস এক্সাম চালু আছে</h3>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.95rem;">এই প্র্যাকটিস এক্সামে ক্লাউডে কোনো ডেটা সেভ হবে না এবং আপনি যতবার খুশি পরীক্ষা দিতে পারবেন।</p>
             <button class="btn btn-primary" onclick="startPracticeExam()">প্র্যাকটিস শুরু করুন 🚀</button>
           </div>`;
-        return; // প্র্যাকটিস মোডে ফায়ারবেস অথেনটিকেশন চেক করবে না
+        return; 
       }
 
-      // যদি "LIVE" মোড হয় তবে ফায়ারবেস অথেনটিকেশন করবে
       onAuthStateChanged(auth, async (user) => {
         if (user) {
           currentUser = user;
@@ -129,7 +127,7 @@
             currentUser = cred.user;
             showScreen('profileSetupScreen');
           } catch (err) {
-            console.error("Auth Error (Silent):", err);
+            console.error("Auth Error:", err);
             showScreen('profileSetupScreen');
           }
         }
@@ -138,7 +136,14 @@
       document.getElementById('quizForm').addEventListener('change', updateAnsweredCountAndSaveDraft);
     });
 
-    // ১. অপশন সিলেক্ট করার সাথে সাথেই অটো-সেভ হবে (শুধুমাত্র লাইভ মোডে)
+    // Theme Toggle Function
+    window.toggleTheme = function() {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('apexTheme', newTheme);
+    }
+
     async function updateAnsweredCountAndSaveDraft() {
       let count = 0;
       userAnswers = {};
@@ -153,7 +158,6 @@
       document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: ${count}/৩০`;
 
       const mode = getExamMode();
-      // ফায়ারবেসে ড্রাফট উত্তর সেভ করা (শুধু লাইভে)
       if (mode === "LIVE" && currentUser) {
         try {
           const draftRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'draft_answers');
@@ -203,12 +207,10 @@
         await setDoc(profileRef, userProfile);
         startExam();
       } catch (e) {
-        console.error(e);
         showModal("তথ্য সংরক্ষণ করতে সমস্যা হয়েছে: " + e.message);
       }
     };
 
-    // ২. লাইভ পরীক্ষা শুরু
     async function startExam() {
       warningCount = 0;
       userAnswers = {};
@@ -255,15 +257,13 @@
       startTimer();
     }
 
-    // প্র্যাকটিস পরীক্ষা শুরু (কোনো ক্লাউড বা ফায়ারবেস ছাড়া)
     window.startPracticeExam = function() {
       warningCount = 0;
       userAnswers = {};
       totalSeconds = examDuration;
       document.getElementById('answeredBadge').innerText = `উত্তর দেওয়া হয়েছে: 0/৩০`;
-      document.getElementById('warningText').style.display = 'none'; // প্র্যাকটিস মোডে ওয়ার্নিং লাগবে না
+      document.getElementById('warningText').style.display = 'none';
 
-      // রেডিও বাটনগুলোর disabled স্টেট সরিয়ে নেওয়া (রিটেক করার সময়)
       for (let i = 1; i <= 30; i++) {
         const options = document.querySelectorAll(`input[name="q${i}"]`);
         options.forEach(opt => opt.disabled = false);
@@ -276,7 +276,7 @@
 
     function enableAntiCheat() {
       const mode = getExamMode();
-      if (mode === "PRACTICE") return; // প্র্যাকটিসে অ্যান্টি-চিট বন্ধ
+      if (mode === "PRACTICE") return;
 
       document.onvisibilitychange = () => {
         if (document.hidden && document.getElementById('examArea').style.display !== 'none') {
@@ -310,7 +310,6 @@
       }, 1000);
     }
 
-    // ৩. ড্রাফট ডাটা থেকে অটো-সাবমিট ফাংশন (শুধু লাইভের জন্য)
     async function autoSubmitFromDraft() {
       try {
         const draftRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'draft_answers');
@@ -341,9 +340,7 @@
         });
 
         showResultPage(score, "LIVE");
-      } catch (e) {
-        console.error("Auto Submit Error:", e);
-      }
+      } catch (e) { console.error("Auto Submit Error:", e); }
     }
 
     window.submitExam = async function(isTerminated = false) {
@@ -365,7 +362,6 @@
 
       const mode = getExamMode();
 
-      // শুধুমাত্র লাইভ মোড হলে ফায়ারবেসে ডেটা সেভ হবে
       if (mode === "LIVE" && currentUser && userProfile) {
         try {
           const examRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'exam_status');
@@ -379,7 +375,7 @@
             score: score,
             timestamp: serverTimestamp()
           });
-        } catch(err) { console.error("Save Error:", err); }
+        } catch(err) {}
       }
 
       showResultPage(score, mode);
@@ -392,7 +388,7 @@
       if (mode === "PRACTICE") {
         document.getElementById('retakeBtn').style.display = 'inline-block';
         document.getElementById('userRankVal').innerText = '- (প্র্যাকটিস)';
-        document.getElementById('tabLbBtn').style.display = 'none'; // প্র্যাকটিসে লিডারবোর্ড দরকার নেই
+        document.getElementById('tabLbBtn').style.display = 'none'; 
         switchTab('review');
       } else {
         document.getElementById('retakeBtn').style.display = 'none';
@@ -404,17 +400,11 @@
       renderAnswerReview();
     }
 
-    // বারবার পরীক্ষা দেওয়ার জন্য ফাংশন
     window.retakePracticeExam = function() {
-      // ফর্ম ও রেডিও বাটন রিসেট
       document.getElementById('quizForm').reset();
       userAnswers = {};
-      
-      // পূর্বের রিভিউ কার্ডগুলোর স্টাইল ক্লিয়ার করা
       const reviewContainer = document.getElementById('reviewTabContent');
       reviewContainer.innerHTML = '';
-      
-      // আবার প্র্যাকটিস শুরু
       startPracticeExam(); 
     }
 
@@ -435,20 +425,17 @@
 
     function loadLeaderboard() {
       const lbRef = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
-      
       onSnapshot(lbRef, (snapshot) => {
         let lbData = [];
         snapshot.forEach(doc => lbData.push(doc.data()));
-        
         lbData.sort((a, b) => b.score - a.score);
 
         const tbody = document.getElementById('leaderboardBody');
         tbody.innerHTML = '';
-
         let myRank = '-';
 
         if(lbData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color:#64748b;">এখনো কেউ পরীক্ষা দেয়নি। প্রথম পরীক্ষা দিয়ে লিডারবোর্ডের শীর্ষে আসো!</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color:var(--text-muted);">এখনো কেউ পরীক্ষা দেয়নি।</td></tr>';
             return;
         }
 
@@ -468,16 +455,17 @@
           tr.innerHTML = `
             <td style="text-align: center;"><div class="rank-badge">${medal}${index + 1}</div></td>
             <td style="font-weight: 600;">${row.name}</td>
-            <td style="font-size: 0.85rem; color:#475569;">${row.college}</td>
+            <td style="font-size: 0.85rem; color:var(--text-muted);">${row.college}</td>
             <td class="lb-score">${row.score}</td>
           `;
           tbody.appendChild(tr);
         });
 
         document.getElementById('userRankVal').innerText = myRank !== '-' ? `#${myRank}` : '-';
-      }, (error) => { console.error("Leaderboard Error:", error); });
+      });
     }
 
+    // নতুন রিভিউ লেআউট লজিক
     function renderAnswerReview() {
       const reviewContainer = document.getElementById('reviewTabContent');
       reviewContainer.innerHTML = '';
@@ -485,7 +473,6 @@
       for (let i = 1; i <= 30; i++) {
         const qKey = 'q' + i;
         const origCard = document.getElementById(`qCard-${i}`);
-        
         if(!origCard) continue;
 
         const cloneCard = origCard.cloneNode(true);
@@ -493,148 +480,180 @@
         const correctAns = correctAnswers[qKey];
 
         const options = cloneCard.querySelectorAll('input[type="radio"]');
-        options.forEach(input => {
-          input.disabled = true;
-          const label = input.closest('.option-label');
-          
-          // কারেক্ট অ্যানসার হলে গ্রিন
-          if (input.value === correctAns) {
-            label.classList.add('correct-option');
-          }
-          // ইউজার যা সিলেক্ট করেছে
-          if (userAns && input.value === userAns) {
-            input.checked = true;
-            if (userAns !== correctAns) {
-              label.classList.add('wrong-option'); // ভুল হলে রেড
-            }
-          }
-        });
+        options.forEach(input => input.disabled = true); // রেডিও বাটন ডিসেবল করা হলো
 
         const solBox = cloneCard.querySelector('.solution-notes');
-        if(solBox) solBox.style.display = 'block';
+        
+        const isCorrect = userAns === correctAns;
+        const userAnsColor = isCorrect ? 'var(--success-color)' : 'var(--danger-color)';
+        const displayUserAns = userAns ? userAns : "কোনো উত্তর দেননি";
 
+        // নতুন এক্সপ্লেনেশন বক্স ডিজাইন
+        const customReviewHTML = `
+          <div class="review-details-box">
+            <div class="review-stat">
+              <span style="color: var(--text-main);">আপনার দেওয়া উত্তর:</span> 
+              <strong style="color: ${userAnsColor};">${displayUserAns}</strong>
+            </div>
+            <div class="review-stat">
+              <span style="color: var(--text-main);">সঠিক উত্তর:</span> 
+              <strong style="color: var(--success-color);">${correctAns}</strong>
+            </div>
+            <div class="review-explanation">
+              ${solBox.innerHTML}
+            </div>
+          </div>
+        `;
+        
+        solBox.outerHTML = customReviewHTML;
         reviewContainer.appendChild(cloneCard);
       }
     }
   </script>
 
   <style>
+    /* Theme Variables */
     :root {
-      --blue-marker: #0038a8;
-      --green-gel: #0b6623;
-      --highlight-yellow: #fff3a8;
-      --paper-bg: #fdfbf7;
-      --line-color: #e2e8f0;
-      --margin-line: #ff8585;
-      --badge-red: #d92525;
-      --bg-color: #f1f5f9;
+      --bg-main: #f1f5f9;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --primary-color: #1e3a8a; 
+      --btn-text: #ffffff;
+      --border-color: #e2e8f0;
+      --success-color: #16a34a;
+      --danger-color: #dc2626;
+      --header-bg: #ffffff;
+      --header-text: #0f172a;
+      --input-bg: #ffffff;
+      --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      --review-bg: #f8fafc;
+    }
+
+    [data-theme="dark"] {
+      --bg-main: #0b1120;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary-color: #eab308; /* Yellow btn from image */
+      --btn-text: #000000;
+      --border-color: #334155;
+      --success-color: #22c55e;
+      --danger-color: #ef4444;
+      --header-bg: #111827;
+      --header-text: #f8fafc;
+      --input-bg: #0f172a;
+      --shadow-sm: 0 4px 15px rgba(0, 0, 0, 0.4);
+      --review-bg: #0f172a;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Hind Siliguri', sans-serif; background-color: var(--bg-color); color: #0f172a; line-height: 1.6; padding: 10px; }
+    body { font-family: 'Hind Siliguri', sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.6; padding: 10px; transition: background 0.3s, color 0.3s; }
     
-    .container { max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 4px 25px rgba(0,0,0,0.08); overflow: hidden; min-height: 85vh; position: relative; }
+    /* Fixed overflow issue for sticky to work */
+    .container { max-width: 900px; margin: 0 auto; min-height: 85vh; position: relative; }
     
-    .header-banner { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); color: #fff; padding: 25px 20px; text-align: center; }
-    .header-banner h1 { font-size: 1.5rem; font-weight: 700; color: #f8fafc; }
-    .header-banner p { font-size: 0.9rem; color: #cbd5e1; }
-
-    .screen-section { padding: 30px 20px; }
-    .card { max-width: 420px; margin: 20px auto; border: 1px solid #cbd5e1; border-radius: 12px; padding: 25px; background: #ffffff; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; }
+    /* Header matches Apex Tracker Topbar style */
+    .header-bar { background: var(--header-bg); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 12px 12px 0 0; box-shadow: var(--shadow-sm); margin-bottom: 20px;}
+    .header-title { font-size: 1.4rem; font-weight: 700; color: var(--header-text); display: flex; align-items: center; gap: 10px;}
+    .theme-btn { background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: 0.3s;}
+    
+    .screen-section { padding: 10px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 30px; box-shadow: var(--shadow-sm); max-width: 450px; margin: 0 auto;}
+    
     .form-group { margin-bottom: 16px; text-align: left; }
-    .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #334155; }
-    .form-group input { width: 100%; padding: 12px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-family: inherit; font-size: 0.95rem; outline: none; }
-    .form-group input:focus { border-color: var(--blue-marker); }
+    .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: var(--text-main); }
+    .form-group input { width: 100%; padding: 12px; background: var(--input-bg); border: 1.5px solid var(--border-color); color: var(--text-main); border-radius: 8px; font-family: inherit; font-size: 0.95rem; outline: none; }
+    .form-group input:focus { border-color: var(--primary-color); }
     
-    .btn { padding: 12px 20px; font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; border: none; width: 100%; margin-top: 10px; }
-    .btn-primary { background: var(--blue-marker); color: white; }
+    .btn { padding: 12px 20px; font-size: 1rem; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; width: 100%; margin-top: 10px; transition: 0.3s;}
+    .btn-primary { background: var(--primary-color); color: var(--btn-text); }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-2px); }
 
-    .timer-bar { position: sticky; top: 0; background: #ffffff; border-bottom: 2px solid var(--blue-marker); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; z-index: 90; }
-    .timer-box { font-size: 1.15rem; font-weight: 700; color: var(--badge-red); background: #fef2f2; padding: 4px 12px; border-radius: 20px; border: 1px solid #fca5a5; }
-    .warning-badge { font-size: 0.85rem; background: #fff7ed; color: #c2410c; padding: 4px 10px; border-radius: 6px; border: 1px solid #ffedd5; font-weight: 600; }
-    .answered-badge { font-size: 0.85rem; background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-weight: 700; }
+    /* Sticky Timer Bar - Fixed! */
+    .timer-bar { 
+      position: sticky; 
+      top: 0; 
+      background: var(--bg-card); 
+      border-bottom: 2px solid var(--border-color); 
+      padding: 12px 20px; 
+      display: flex; 
+      flex-wrap: wrap; 
+      gap: 10px; 
+      justify-content: space-between; 
+      align-items: center; 
+      z-index: 1000; /* Ensures it stays on top */
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .timer-box { font-size: 1.15rem; font-weight: 700; color: var(--danger-color); background: var(--bg-main); padding: 4px 12px; border-radius: 20px; border: 1px solid var(--danger-color); }
+    .warning-badge { font-size: 0.85rem; background: var(--bg-main); color: var(--danger-color); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--danger-color); font-weight: 600; }
+    .answered-badge { font-size: 0.85rem; background: var(--bg-main); color: var(--primary-color); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--primary-color); font-weight: 700; }
 
-    .notebook-paper { background-color: var(--paper-bg); background-image: linear-gradient(var(--line-color) 1px, transparent 1px); background-size: 100% 28px; padding: 25px 20px 25px 30px; position: relative; border-left: 3px solid var(--margin-line); }
-
-    .mcq-card { background: rgba(255, 255, 255, 0.95); border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px; margin-bottom: 20px; position: relative; }
-    .question-title { font-size: 1.05rem; font-weight: 700; color: var(--blue-marker); margin-bottom: 12px; }
+    .mcq-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
+    .question-title { font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 15px; }
     .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 580px) { .options-grid { grid-template-columns: 1fr; } }
     
-    .option-label { display: flex; align-items: center; padding: 10px 12px; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
-    .option-label input { margin-right: 10px; accent-color: var(--blue-marker); transform: scale(1.1); }
+    .option-label { display: flex; align-items: center; padding: 12px; background: var(--bg-main); border: 1.5px solid var(--border-color); border-radius: 8px; cursor: pointer; font-size: 0.95rem; color: var(--text-main); font-weight: 600; transition: 0.2s; }
+    .option-label:hover { border-color: var(--primary-color); }
+    .option-label input { margin-right: 10px; accent-color: var(--primary-color); transform: scale(1.1); }
 
-    .correct-option { background-color: #dcfce7 !important; border-color: #22c55e !important; color: #15803d; font-weight: bold; }
-    .wrong-option { background-color: #fee2e2 !important; border-color: #ef4444 !important; color: #b91c1c; font-weight: bold; }
+    .solution-notes { display: none; } /* Hidden initially, replaced in JS */
+    
+    /* New Review Box Styles */
+    .review-details-box { margin-top: 15px; padding: 15px; background: var(--review-bg); border-radius: 8px; border: 1px solid var(--border-color); }
+    .review-stat { margin-bottom: 8px; font-weight: 600; font-size: 1rem; }
+    .review-explanation { border-top: 1px dashed var(--border-color); padding-top: 12px; margin-top: 10px; font-family: 'Kalam', 'Hind Siliguri', cursive; color: var(--text-muted); font-size: 1rem; }
+    .highlight { background-color: rgba(234, 179, 8, 0.2); padding: 0 4px; border-radius: 3px; color: var(--text-main); font-weight: 600; }
+    .blue-heading { color: var(--primary-color); font-weight: 700; font-family: 'Hind Siliguri', sans-serif;}
 
-    .solution-notes { display: none; margin-top: 15px; padding: 14px; background: #f0fdf4; border-left: 4px solid var(--green-gel); border-radius: 0 8px 8px 0; font-family: 'Kalam', 'Hind Siliguri', cursive; color: var(--green-gel); font-size: 1rem; }
-    .solution-notes h4 { font-family: 'Hind Siliguri', sans-serif; color: var(--blue-marker); font-size: 0.95rem; margin-bottom: 4px;}
-    .highlight { background-color: var(--highlight-yellow); padding: 0 4px; border-radius: 3px; color: #000; font-weight: 600; }
-    .blue-heading { color: var(--blue-marker); font-weight: 700; }
+    .result-summary { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 30px; text-align: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
+    .score-badge { font-size: 2.5rem; font-weight: 800; color: var(--primary-color); }
 
-    .result-summary { background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 20px; }
-    .score-badge { font-size: 2.2rem; font-weight: 800; color: var(--blue-marker); }
+    .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab-btn { flex: 1; padding: 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; color: var(--text-muted); transition: 0.3s;}
+    .tab-btn.active { background: var(--primary-color); color: var(--btn-text); border-color: var(--primary-color); }
 
-    .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; }
-    .tab-btn { flex: 1; padding: 12px; background: #f1f5f9; border: none; font-family: inherit; font-size: 1rem; font-weight: 700; cursor: pointer; border-top-left-radius: 8px; border-top-right-radius: 8px; color: #64748b; }
-    .tab-btn.active { background: var(--blue-marker); color: white; }
-
-    .lb-container { border: 1px solid #cbd5e1; border-radius: 10px; overflow: hidden; background: white; }
+    .lb-container { border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; background: var(--bg-card); box-shadow: var(--shadow-sm); }
     table { width: 100%; border-collapse: collapse; text-align: left; }
-    th, td { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; }
-    th { background: #f1f5f9; font-weight: 700; color: #475569; font-size: 0.85rem; }
-    tr:nth-child(even) { background-color: #f8fafc; }
-    .my-row { background-color: #fef9c3 !important; }
-    .lb-score { color: var(--blue-marker); font-weight: 700; font-size: 1.1rem; text-align: center;}
-    .rank-badge { display: inline-block; background: #e2e8f0; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; }
+    th, td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
+    th { background: var(--bg-main); font-weight: 700; color: var(--text-muted); font-size: 0.85rem; }
+    .my-row { background-color: rgba(234, 179, 8, 0.1) !important; }
+    .lb-score { color: var(--primary-color); font-weight: 700; font-size: 1.1rem; text-align: center;}
+    .rank-badge { display: inline-block; background: var(--bg-main); padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; border: 1px solid var(--border-color);}
 
-    .footer-notice { 
-      text-align: center; 
-      padding: 16px 20px; 
-      background: linear-gradient(135deg, #090a0f 0%, #171922 50%, #050608 100%); 
-      color: #e2e8f0; 
-      font-size: 0.9rem; 
-      font-weight: 600; 
-      border-top: 2px solid #d4af37;
-      box-shadow: inset 0 1px 3px rgba(255, 215, 0, 0.15);
-      letter-spacing: 0.5px;
-    }
-    .golden-text {
-      background: linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 800;
-      font-size: 1.05rem;
-      display: inline-block;
-      text-shadow: 0 0 12px rgba(212, 175, 55, 0.3);
-    }
-
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.75); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(4px); }
-    .modal-content { background: white; padding: 25px; border-radius: 12px; max-width: 380px; text-align: center; width: 90%; }
+    .footer-notice { text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; margin-top: 20px;}
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); display: none; justify-content: center; align-items: center; z-index: 9999; backdrop-filter: blur(4px); }
+    .modal-content { background: var(--bg-card); padding: 25px; border-radius: 16px; max-width: 380px; text-align: center; width: 90%; border: 1px solid var(--border-color); box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
   </style>
 </head>
 <body>
 
-  <!-- অ্যালার্ট মোডাল -->
   <div class="modal-overlay" id="customModal">
     <div class="modal-content">
       <div style="font-size: 2rem; margin-bottom: 10px;">🔔</div>
-      <p id="modalMessage" style="margin-bottom: 20px; font-weight: 600; font-size: 0.95rem; color: #334155;"></p>
+      <p id="modalMessage" style="margin-bottom: 20px; font-weight: 600; font-size: 0.95rem; color: var(--text-main);"></p>
       <button class="btn btn-primary" onclick="closeModal()">ঠিক আছে</button>
     </div>
   </div>
 
   <div class="container">
-    <div class="header-banner">
-      <h1>এইচএসসি পদার্থবিজ্ঞান - তাপগতিবিদ্যা এমসিকিউ পরীক্ষা</h1>
-      <p>৩০টি গুরুত্বপূর্ণ বোর্ড ও ভর্তি পরীক্ষার প্রশ্ন ও ব্যাখ্যা</p>
+    <!-- Apex Tracker Style Header -->
+    <div class="header-bar">
+      <div class="header-title">
+        <span style="font-size: 1.8rem; color: var(--primary-color);">⚡</span>
+        HSC Cloud Exam Hub
+      </div>
+      <button class="theme-btn" onclick="toggleTheme()">🌓 Theme</button>
     </div>
 
     <!-- ১. নাম ও কলেজ ইনপুট স্ক্রিন -->
     <div id="profileSetupScreen" class="screen-section">
       <div class="card">
-        <h3 style="color: var(--blue-marker); margin-bottom: 8px;">পরীক্ষার্থীর তথ্য</h3>
-        <p style="margin-bottom: 20px; color: #64748b; font-size: 0.85rem;">লিডারবোর্ডের জন্য আপনার সঠিক নাম ও কলেজের নাম দিন।</p>
+        <h3 style="color: var(--text-main); margin-bottom: 8px;">পরীক্ষার্থীর তথ্য</h3>
+        <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.85rem;">লিডারবোর্ডের জন্য আপনার সঠিক নাম ও কলেজের নাম দিন।</p>
         <div class="form-group">
           <label>পরীক্ষার্থীর নাম:</label>
           <input type="text" id="studentNameInput" placeholder="পূর্ণ নাম লিখুন" />
@@ -648,16 +667,17 @@
     </div>
 
     <!-- ২. পরীক্ষা নেওয়ার স্ক্রিন -->
-    <div id="examArea" style="display: none; background: #f8fafc;">
+    <div id="examArea" style="display: none;">
+      <!-- Sticky Timer Bar (Fixed Overflow Issue) -->
       <div class="timer-bar">
         <div class="answered-badge" id="answeredBadge">উত্তর দেওয়া হয়েছে: 0/৩০</div>
         <div class="warning-badge" id="warningText">ট্যাব পরিবর্তন: 0/২</div>
         <div class="timer-box" id="timeDisplay">25:00</div>
       </div>
 
-      <div class="notebook-paper">
+      <div class="questions-container">
         <form id="quizForm">
-          
+          <!-- প্রশ্ন ১ -->
           <div class="mcq-card" id="qCard-1">
             <div class="question-title">১. তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে নিচের কোনটি ব্যবহৃত হয়?</div>
             <div class="options-grid">
@@ -667,11 +687,11 @@
               <label class="option-label"><input type="radio" name="q1" value="D"> র্যাংকিন স্কেল</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • <span class="blue-heading">বিশ্লেষণ:</span> SI এককে তাপমাত্রার মৌলিক একক হলো <span class="highlight">কেলভিন (K)</span>। বৈজ্ঞানিক ও আন্তর্জাতিক গবেষণায় তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে কেলভিন স্কেল ব্যবহার করা হয়।
+              <span class="blue-heading">বিশ্লেষণ:</span> SI এককে তাপমাত্রার মৌলিক একক হলো <span class="highlight">কেলভিন (K)</span>। বৈজ্ঞানিক ও আন্তর্জাতিক গবেষণায় তাপমাত্রার আন্তর্জাতিক স্কেল হিসেবে কেলভিন স্কেল ব্যবহার করা হয়।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২ -->
           <div class="mcq-card" id="qCard-2">
             <div class="question-title">২. তাপমাত্রার ফারেনহাইট ও সেলসিয়াস স্কেলে কোন পাঠে মান একই নির্দেশ করে?</div>
             <div class="options-grid">
@@ -681,12 +701,12 @@
               <label class="option-label"><input type="radio" name="q2" value="D"> \( 100^\circ \)</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • <span class="blue-heading">সম্পর্ক:</span> \( \frac{C}{5} = \frac{F-32}{9} \)<br/>
-              • ধরি, \( C = F = x \)। \( \Rightarrow \frac{x}{5} = \frac{x-32}{9} \Rightarrow 9x = 5x - 160 \Rightarrow 4x = -160 \Rightarrow x = \mathbf{-40^\circ} \)।
+              <span class="blue-heading">সম্পর্ক:</span> \( \frac{C}{5} = \frac{F-32}{9} \)<br/>
+              ধরি, \( C = F = x \)। \( \Rightarrow \frac{x}{5} = \frac{x-32}{9} \Rightarrow 9x = 5x - 160 \Rightarrow 4x = -160 \Rightarrow x = \mathbf{-40^\circ} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৩ -->
           <div class="mcq-card" id="qCard-3">
             <div class="question-title">৩. কোনো বস্তুর তাপমাত্রা \( 25^\circ\text{C} \) বৃদ্ধি পেলে ফারেনহাইট স্কেলে তা কত বৃদ্ধি পাবে?</div>
             <div class="options-grid">
@@ -696,12 +716,12 @@
               <label class="option-label"><input type="radio" name="q3" value="D"> \( 77^\circ\text{F} \)</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • তাপমাত্রার পরিবর্তনের ক্ষেত্রে: \( \frac{\Delta C}{5} = \frac{\Delta F}{9} \)<br/>
-              • \( \Delta F = \frac{9}{5} \times \Delta C = \frac{9}{5} \times 25 = \mathbf{45^\circ\text{F}} \) ।
+              তাপমাত্রার পরিবর্তনের ক্ষেত্রে: \( \frac{\Delta C}{5} = \frac{\Delta F}{9} \)<br/>
+              \( \Delta F = \frac{9}{5} \times \Delta C = \frac{9}{5} \times 25 = \mathbf{45^\circ\text{F}} \) ।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৪ -->
           <div class="mcq-card" id="qCard-4">
             <div class="question-title">৪. তাপগতিবিদ্যার শূন্যতম সূত্রের (Zeroth Law) ভিত্তি কোনটি?</div>
             <div class="options-grid">
@@ -711,11 +731,11 @@
               <label class="option-label"><input type="radio" name="q4" value="D"> শক্তির নিত্যতা</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • <span class="blue-heading">মূলনীতি:</span> যদি দুটি বস্তু পৃথকভাবে তৃতীয় কোনো বস্তুর সাথে তাপীয় সমতায় থাকে, তবে তারা পরস্পরের সাথেও তাপীয় সমতায় থাকবে। এই সূত্র থেকেই <span class="highlight">তাপমাত্রার ধারণার</span> উৎপত্তি।
+              <span class="blue-heading">মূলনীতি:</span> যদি দুটি বস্তু পৃথকভাবে তৃতীয় কোনো বস্তুর সাথে তাপীয় সমতায় থাকে, তবে তারা পরস্পরের সাথেও তাপীয় সমতায় থাকবে। এই সূত্র থেকেই <span class="highlight">তাপমাত্রার ধারণার</span> উৎপত্তি।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৫ -->
           <div class="mcq-card" id="qCard-5">
             <div class="question-title">৫. পানির ত্রৈধ বিন্দুর (Triple Point of Water) চাপ কত?</div>
             <div class="options-grid">
@@ -725,11 +745,11 @@
               <label class="option-label"><input type="radio" name="q5" value="D"> 0.006 atm</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • পানির ত্রৈধ বিন্দুতে বরফ, পানি ও জলীয় বাষ্প সাম্যাবস্থায় থাকে। এর তাপমাত্রা \( 273.16\text{ K} \) এবং চাপ <span class="highlight">4.58 mm Hg</span> (বা \( 611.65\text{ Pa} \))।
+              পানির ত্রৈধ বিন্দুতে বরফ, পানি ও জলীয় বাষ্প সাম্যাবস্থায় থাকে। এর তাপমাত্রা \( 273.16\text{ K} \) এবং চাপ <span class="highlight">4.58 mm Hg</span> (বা \( 611.65\text{ Pa} \))।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৬ -->
           <div class="mcq-card" id="qCard-6">
             <div class="question-title">৬. তাপগতিবিদ্যার প্রথম সূত্র মূলত কোনটির সংরক্ষণশীলতা নীতি নির্দেশ করে?</div>
             <div class="options-grid">
@@ -739,11 +759,11 @@
               <label class="option-label"><input type="radio" name="q6" value="D"> চার্জ</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • সূত্রানুযায়ী: \( dQ = dU + dW \)। এটি সিস্টেমের <span class="highlight">শক্তির সংরক্ষণশীলতা নীতি</span> প্রকাশ করে।
+              সূত্রানুযায়ী: \( dQ = dU + dW \)। এটি সিস্টেমের <span class="highlight">শক্তির সংরক্ষণশীলতা নীতি</span> প্রকাশ করে।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৭ -->
           <div class="mcq-card" id="qCard-7">
             <div class="question-title">৭. একটি আবদ্ধ সিস্টেমে 500 J তাপ সরবরাহ করা হলো এবং সিস্টেম দ্বারা 200 J কাজ সম্পাদিত হলো। অভ্যন্তরীণ শক্তির পরিবর্তন কত?</div>
             <div class="options-grid">
@@ -753,11 +773,11 @@
               <label class="option-label"><input type="radio" name="q7" value="D"> 2.5 J</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( dQ = dU + dW \Rightarrow dU = dQ - dW = 500\text{ J} - 200\text{ J} = \mathbf{300\text{ J}} \)।
+              \( dQ = dU + dW \Rightarrow dU = dQ - dW = 500\text{ J} - 200\text{ J} = \mathbf{300\text{ J}} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৮ -->
           <div class="mcq-card" id="qCard-8">
             <div class="question-title">৮. সমোষ্ণ প্রক্রিয়ায় (Isothermal Process) নিচের কোনটি ধ্রুব থাকে?</div>
             <div class="options-grid">
@@ -767,11 +787,11 @@
               <label class="option-label"><input type="radio" name="q8" value="D"> তাপের পরিমাণ</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • আদর্শ গ্যাসের অভ্যন্তরীণ শক্তি শুধুমাত্র তাপমাত্রার ওপর নির্ভর করে (\( U \propto T \))। সমোষ্ণ প্রক্রিয়ায় তাপমাত্রা ধ্রুব থাকায় <span class="highlight">অভ অভ্যন্তরীণ শক্তি স্থির থাকে</span> (\( \Delta U = 0 \))।
+              আদর্শ গ্যাসের অভ্যন্তরীণ শক্তি শুধুমাত্র তাপমাত্রার ওপর নির্ভর করে (\( U \propto T \))। সমোষ্ণ প্রক্রিয়ায় তাপমাত্রা ধ্রুব থাকায় <span class="highlight">অভ্যন্তরীণ শক্তি স্থির থাকে</span> (\( \Delta U = 0 \))।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৯ -->
           <div class="mcq-card" id="qCard-9">
             <div class="question-title">৯. রুদ্ধতাপীয় প্রক্রিয়ায় (Adiabatic Process) পরিবেশের সাথে সিস্টেমের কোনটি বিনিময় হয় না?</div>
             <div class="options-grid">
@@ -781,11 +801,11 @@
               <label class="option-label"><input type="radio" name="q9" value="D"> কাজ</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • রুদ্ধতাপীয় প্রক্রিয়ায় সিস্টেম থেকে বাহিরে বা বাহির থেকে ভেতরে <span class="highlight">তাপ আদান-প্রদান হয় না</span> (\( dQ = 0 \))।
+              রুদ্ধতাপীয় প্রক্রিয়ায় সিস্টেম থেকে বাহিরে বা বাহির থেকে ভেতরে <span class="highlight">তাপ আদান-প্রদান হয় না</span> (\( dQ = 0 \))।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১০ -->
           <div class="mcq-card" id="qCard-10">
             <div class="question-title">১০. একটি দ্বি-পরমাণুক গ্যাসের ক্ষেত্রে \( \gamma (C_p / C_v) \) এর মান কত?</div>
             <div class="options-grid">
@@ -795,13 +815,13 @@
               <label class="option-label"><input type="radio" name="q10" value="D"> 1.00</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • এক-পরমাণুক গ্যাস: \( \gamma = 1.67 \)<br/>
-              • <span class="highlight">দ্বি-পরমাণুক গ্যাস: \( \gamma = 1.40 \)</span><br/>
-              • বহুপ পরমাণুক গ্যাস: \( \gamma = 1.33 \)
+              এক-পরমাণুক গ্যাস: \( \gamma = 1.67 \)<br/>
+              <span class="highlight">দ্বি-পরমাণুক গ্যাস: \( \gamma = 1.40 \)</span><br/>
+              বহুপ পরমাণুক গ্যাস: \( \gamma = 1.33 \)
             </div>
           </div>
 
+          <!-- প্রশ্ন ১১ -->
           <div class="mcq-card" id="qCard-11">
             <div class="question-title">১১. সমায়তন প্রক্রিয়ায় (Isochoric Process) সম্পাদিত কাজ (\( dW \)) কত?</div>
             <div class="options-grid">
@@ -811,11 +831,11 @@
               <label class="option-label"><input type="radio" name="q11" value="D"> \( \infty \)</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • কাজ \( dW = P \cdot dV \)। সমায়তন প্রক্রিয়ায় আয়তনের পরিবর্তন \( dV = 0 \), ফলে কৃতকাজ <span class="highlight">\( dW = 0 \)</span> হয়।
+              কাজ \( dW = P \cdot dV \)। সমায়তন প্রক্রিয়ায় আয়তনের পরিবর্তন \( dV = 0 \), ফলে কৃতকাজ <span class="highlight">\( dW = 0 \)</span> হয়।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১২ -->
           <div class="mcq-card" id="qCard-12">
             <div class="question-title">১২. রুদ্ধতাপীয় সম্প্রসারণে (Adiabatic Expansion) গ্যাসের তাপমাত্রা কেমন হয়?</div>
             <div class="options-grid">
@@ -825,11 +845,11 @@
               <label class="option-label"><input type="radio" name="q12" value="D"> শূন্য হয়</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • রুদ্ধতাপীয় প্রক্রিয়ায় \( dQ = 0 \Rightarrow dU = -dW \)। সম্প্রসারণে কাজ ধনাত্মক তাই অভ্যন্তরীণ শক্তি কমে যায় এবং <span class="highlight">তাপমাত্রা হ্রাস পায়</span>।
+              রুদ্ধতাপীয় প্রক্রিয়ায় \( dQ = 0 \Rightarrow dU = -dW \)। সম্প্রসারণে কাজ ধনাত্মক তাই অভ্যন্তরীণ শক্তি কমে যায় এবং <span class="highlight">তাপমাত্রা হ্রাস পায়</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৩ -->
           <div class="mcq-card" id="qCard-13">
             <div class="question-title">১৩. দ্বি-পরমাণুক গ্যাসের জন্য সমোষ্ণ লেখের নতি (Slope) এবং রুদ্ধতাপীয় লেখের নতির অনুপাত কত?</div>
             <div class="options-grid">
@@ -839,12 +859,12 @@
               <label class="option-label"><input type="radio" name="q13" value="D"> 1 : 1</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • রুদ্ধতাপীয় রেখার ঢাল = \( \gamma \times \) সমোষ্ণ রেখার ঢাল।<br/>
-              • \( \frac{\text{সমোষ্ণ ঢাল}}{\text{রুদ্ধতাপীয় ঢাল}} = \frac{1}{\gamma} = \frac{1}{1.4} \Rightarrow \mathbf{1 : 1.4} \)।
+              রুদ্ধতাপীয় রেখার ঢাল = \( \gamma \times \) সমোষ্ণ রেখার ঢাল।<br/>
+              \( \frac{\text{সমোষ্ণ ঢাল}}{\text{রুদ্ধতাপীয় ঢাল}} = \frac{1}{\gamma} = \frac{1}{1.4} \Rightarrow \mathbf{1 : 1.4} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৪ -->
           <div class="mcq-card" id="qCard-14">
             <div class="question-title">১৪. কার্নো ইঞ্জিনের দক্ষতা (\( \eta \)) ১০০% হতে হলে গ্রাহকের তাপমাত্রা (\( T_2 \)) কত হতে হবে?</div>
             <div class="options-grid">
@@ -854,11 +874,11 @@
               <label class="option-label"><input type="radio" name="q14" value="D"> 273 K</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( \eta = \left(1 - \frac{T_2}{T_1}\right) \times 100\% \)। দক্ষতা ১০০% বা ১ হতে হলে \( \frac{T_2}{T_1} = 0 \Rightarrow \mathbf{T_2 = 0\text{ K}} \) হতে হবে।
+              \( \eta = \left(1 - \frac{T_2}{T_1}\right) \times 100\% \)। দক্ষতা ১০০% বা ১ হতে হলে \( \frac{T_2}{T_1} = 0 \Rightarrow \mathbf{T_2 = 0\text{ K}} \) হতে হবে।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৫ -->
           <div class="mcq-card" id="qCard-15">
             <div class="question-title">১৫. কার্নো চক্রে মোট কয়টি ধাপ থাকে?</div>
             <div class="options-grid">
@@ -868,11 +888,11 @@
               <label class="option-label"><input type="radio" name="q15" value="D"> ৬টি</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • ৪টি ধাপ হলো: ১. সমোষ্ণ সম্প্রসারণ ২. রুদ্ধতাপীয় সম্প্রসারণ ৩. সমোষ্ণ সংকোচন ৪. রুদ্ধতাপীয় সংকোচন।
+              ৪টি ধাপ হলো: ১. সমোষ্ণ সম্প্রসারণ ২. রুদ্ধতাপীয় সম্প্রসারণ ৩. সমোষ্ণ সংকোচন ৪. রুদ্ধতাপীয় সংকোচন।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৬ -->
           <div class="mcq-card" id="qCard-16">
             <div class="question-title">১৬. একটি ইঞ্জিনের উৎসের তাপমাত্রা 600 K এবং তাপ গ্রাহকের তাপমাত্রা 300 K হলে এর কর্মদক্ষতা কত?</div>
             <div class="options-grid">
@@ -882,11 +902,11 @@
               <label class="option-label"><input type="radio" name="q16" value="D"> 75%</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( \eta = \left(1 - \frac{300}{600}\right) \times 100\% = (1 - 0.5) \times 100\% = \mathbf{50\%} \)।
+              \( \eta = \left(1 - \frac{300}{600}\right) \times 100\% = (1 - 0.5) \times 100\% = \mathbf{50\%} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৭ -->
           <div class="mcq-card" id="qCard-17">
             <div class="question-title">১৭. রেফ্রিজারেটর বা হিমায়ক কোন নীতিতে কাজ করে?</div>
             <div class="options-grid">
@@ -896,11 +916,11 @@
               <label class="option-label"><input type="radio" name="q17" value="D"> তাপ সরবরাহকারী বয়লার</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • রেফ্রিজারেটর নিম্ন তাপমাত্রার আধার থেকে তাপ শোষণ করে বহিস্থ কাজের সাহায্যে উচ্চ তাপমাত্রার আধারে বর্জন করে। এটি একটি <span class="highlight">বিপরীতমুখী কার্নো চক্র</span>।
+              রেফ্রিজারেটর নিম্ন তাপমাত্রার আধার থেকে তাপ শোষণ করে বহিস্থ কাজের সাহায্যে উচ্চ তাপমাত্রার আধারে বর্জন করে। এটি একটি <span class="highlight">বিপরীতমুখী কার্নো চক্র</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৮ -->
           <div class="mcq-card" id="qCard-18">
             <div class="question-title">১৮. উৎসের তাপমাত্রা স্থির রেখে কার্নো ইঞ্জিনের দক্ষতা বৃদ্ধি করতে হলে গ্রাহকের তাপমাত্রা—</div>
             <div class="options-grid">
@@ -910,11 +930,11 @@
               <label class="option-label"><input type="radio" name="q18" value="D"> দ্বিগুণ করতে হবে</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( \eta = 1 - \frac{T_2}{T_1} \)। \( T_1 \) স্থির রেখে \( T_2 \) কমালে \( \frac{T_2}{T_1} \) এর মান কমবে, ফলে <span class="highlight">\( \eta \) বৃদ্ধি পাবে</span>।
+              \( \eta = 1 - \frac{T_2}{T_1} \)। \( T_1 \) স্থির রেখে \( T_2 \) কমালে \( \frac{T_2}{T_1} \) এর মান কমবে, ফলে <span class="highlight">\( \eta \) বৃদ্ধি পাবে</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ১৯ -->
           <div class="mcq-card" id="qCard-19">
             <div class="question-title">১৯. সমস্ত প্রত্যাবর্তী প্রক্রিয়ায় (Reversible Process) বিশ্বের মোট এনট্রপি—</div>
             <div class="options-grid">
@@ -924,11 +944,11 @@
               <label class="option-label"><input type="radio" name="q19" value="D"> শূন্য হয়ে যায়</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • প্রত্যাবর্তী চক্রে এনট্রপির পরিবর্তন \( \Delta S = \oint \frac{dQ}{T} = 0 \), অর্থাৎ <span class="highlight">এনট্রপি অপরিবর্তিত থাকে</span>।
+              প্রত্যাবর্তী চক্রে এনট্রপির পরিবর্তন \( \Delta S = \oint \frac{dQ}{T} = 0 \), অর্থাৎ <span class="highlight">এনট্রপি অপরিবর্তিত থাকে</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২০ -->
           <div class="mcq-card" id="qCard-20">
             <div class="question-title">২০. অপ্রত্যাবর্তী প্রক্রিয়ায় (Irreversible Process) এনট্রপি—</div>
             <div class="options-grid">
@@ -938,11 +958,11 @@
               <label class="option-label"><input type="radio" name="q20" value="D"> শূন্য হয়</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • প্রকৃতিতে সংঘটিত সকল স্বতঃস্ফূর্ত বা অপ্রত্যাবর্তী প্রক্রিয়ায় <span class="highlight">এনট্রপি বৃদ্ধি পায়</span> (\( \Delta S > 0 \))।
+              প্রকৃতিতে সংঘটিত সকল স্বতঃস্ফূর্ত বা অপ্রত্যাবর্তী প্রক্রিয়ায় <span class="highlight">এনট্রপি বৃদ্ধি পায়</span> (\( \Delta S > 0 \))।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২১ -->
           <div class="mcq-card" id="qCard-21">
             <div class="question-title">২১. এনট্রপির একক কোনটি?</div>
             <div class="options-grid">
@@ -952,11 +972,11 @@
               <label class="option-label"><input type="radio" name="q21" value="D"> \( \text{N/m}^2 \)</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • এনট্রপির পরিবর্তন \( dS = \frac{dQ}{T} \)। তাপের একক জুল (J) এবং তাপমাত্রার একক কেলভিন (K), তাই একক <span class="highlight">J/K</span>।
+              এনট্রপির পরিবর্তন \( dS = \frac{dQ}{T} \)। তাপের একক জুল (J) এবং তাপমাত্রার একক কেলভিন (K), তাই একক <span class="highlight">J/K</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২২ -->
           <div class="mcq-card" id="qCard-22">
             <div class="question-title">২২. পরম শূন্য তাপমাত্রায় কোনো বিশুদ্ধ কেলাসের এনট্রপি কত?</div>
             <div class="options-grid">
@@ -966,11 +986,11 @@
               <label class="option-label"><input type="radio" name="q22" value="D"> -273</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • তাপগতিবিদ্যার ৩য় সূত্র অনুযায়ী পরম শূন্য তাপমাত্রায় (0 K) অণুগুলোর গতি সম্পূর্ণ থেমে যায়, ফলে <span class="highlight">এনট্রপি শূন্য</span> হয়।
+              তাপগতিবিদ্যার ৩য় সূত্র অনুযায়ী পরম শূন্য তাপমাত্রায় (0 K) অণুগুলোর গতি সম্পূর্ণ থেমে যায়, ফলে <span class="highlight">এনট্রপি শূন্য</span> হয়।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৩ -->
           <div class="mcq-card" id="qCard-23">
             <div class="question-title">২৩. পদার্থবিজ্ঞানের কোন রাশিকে "বিশৃঙ্খলার পরিমাপক" বলা হয়?</div>
             <div class="options-grid">
@@ -980,11 +1000,11 @@
               <label class="option-label"><input type="radio" name="q23" value="D"> এনথালপি</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • <span class="highlight">এনট্রপি</span> হলো কোনো সিস্টেমের অণুগুলোর বিশৃঙ্খলা বা এলোমেলোভাবের পরিমাপক।
+              <span class="highlight">এনট্রপি</span> হলো কোনো সিস্টেমের অণুগুলোর বিশৃঙ্খলা বা এলোমেলোভাবের পরিমাপক।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৪ -->
           <div class="mcq-card" id="qCard-24">
             <div class="question-title">২৪. \( 0^\circ\text{C} \) তাপমাত্রার 1 kg বরফকে \( 0^\circ\text{C} \) তাপমাত্রার পানিতে পরিণত করলে এনট্রপির পরিবর্তন কত? (\( L_f = 3.36 \times 10^5\text{ J/kg} \))</div>
             <div class="options-grid">
@@ -994,11 +1014,11 @@
               <label class="option-label"><input type="radio" name="q24" value="D"> 1.23 J/K</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( dS = \frac{mL_f}{T} = \frac{1 \times 3.36 \times 10^5}{273} \approx \mathbf{1230.77\text{ J/K}} \)।
+              \( dS = \frac{mL_f}{T} = \frac{1 \times 3.36 \times 10^5}{273} \approx \mathbf{1230.77\text{ J/K}} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৫ -->
           <div class="mcq-card" id="qCard-25">
             <div class="question-title">২৫. \( 27^\circ\text{C} \) তাপমাত্রায় গ্যাসের আয়তন সংকুচিত করে অর্ধেক করা হলে চূড়ান্ত তাপমাত্রা কত? (\( \gamma = 1.4 \))</div>
             <div class="options-grid">
@@ -1008,12 +1028,12 @@
               <label class="option-label"><input type="radio" name="q25" value="D"> 500 K</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( T_1 V_1^{\gamma-1} = T_2 V_2^{\gamma-1} \)<br/>
-              • \( T_2 = 300 \times (2)^{0.4} \approx \mathbf{395.85\text{ K}} \) ।
+              \( T_1 V_1^{\gamma-1} = T_2 V_2^{\gamma-1} \)<br/>
+              \( T_2 = 300 \times (2)^{0.4} \approx \mathbf{395.85\text{ K}} \) ।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৬ -->
           <div class="mcq-card" id="qCard-26">
             <div class="question-title">২৬. কার্নো ইঞ্জিনের \( T_1 = 400\text{ K}, T_2 = 300\text{ K} \) এর দক্ষতা \( \eta_1 \)। উভয় তাপমাত্রা 100 K বাড়ালে নতুন দক্ষতা \( \eta_2 \) এর সম্পর্ক কী?</div>
             <div class="options-grid">
@@ -1023,12 +1043,12 @@
               <label class="option-label"><input type="radio" name="q26" value="D"> \( \eta_2 = 2\eta_1 \)</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( \eta_1 = 1 - \frac{300}{400} = 25\% \)<br/>
-              • \( \eta_2 = 1 - \frac{400}{500} = 20\% \)। অতএব, <span class="highlight">\( \eta_1 > \eta_2 \)</span>।
+              \( \eta_1 = 1 - \frac{300}{400} = 25\% \)<br/>
+              \( \eta_2 = 1 - \frac{400}{500} = 20\% \)। অতএব, <span class="highlight">\( \eta_1 > \eta_2 \)</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৭ -->
           <div class="mcq-card" id="qCard-27">
             <div class="question-title">২৭. সমোষ্ণ সম্প্রসারণের ক্ষেত্রে কৃত কাজের সঠিক সূত্র কোনটি?</div>
             <div class="options-grid">
@@ -1038,11 +1058,11 @@
               <label class="option-label"><input type="radio" name="q27" value="D"> W = 0</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • সমোষ্ণ কাজের সূত্র: <span class="highlight">\( W = nRT \ln\left(\frac{V_2}{V_1}\right) \)</span>।
+              সমোষ্ণ কাজের সূত্র: <span class="highlight">\( W = nRT \ln\left(\frac{V_2}{V_1}\right) \)</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৮ -->
           <div class="mcq-card" id="qCard-28">
             <div class="question-title">২৮. কোনো তাপ ইঞ্জিনের গৃহীত তাপ \( Q_1 = 1000\text{ J} \) এবং বর্জিত তাপ \( Q_2 = 400\text{ J} \) হলে কাজের পরিমাণ কত?</div>
             <div class="options-grid">
@@ -1052,11 +1072,11 @@
               <label class="option-label"><input type="radio" name="q28" value="D"> 2.5 J</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • কাজের মান \( W = Q_1 - Q_2 = 1000\text{ J} - 400\text{ J} = \mathbf{600\text{ J}} \)।
+              কাজের মান \( W = Q_1 - Q_2 = 1000\text{ J} - 400\text{ J} = \mathbf{600\text{ J}} \)।
             </div>
           </div>
 
+          <!-- প্রশ্ন ২৯ -->
           <div class="mcq-card" id="qCard-29">
             <div class="question-title">২৯. রুদ্ধতাপীয় পরিবর্তনের ক্ষেত্রে চাপ (P) এবং তাপমাত্রার (T) মধ্যে সম্পর্ক কোনটি?</div>
             <div class="options-grid">
@@ -1066,11 +1086,11 @@
               <label class="option-label"><input type="radio" name="q29" value="D"> PT = Constant</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • রুদ্ধতাপীয় চাপ-তাপমাত্রা সম্পর্ক: <span class="highlight">\( P^{1-\gamma} T^\gamma = \text{Constant} \)</span>।
+              রুদ্ধতাপীয় চাপ-তাপমাত্রা সম্পর্ক: <span class="highlight">\( P^{1-\gamma} T^\gamma = \text{Constant} \)</span>।
             </div>
           </div>
 
+          <!-- প্রশ্ন ৩০ -->
           <div class="mcq-card" id="qCard-30">
             <div class="question-title">৩০. ১ মোল আদর্শ গ্যাসের তাপমাত্রা 1 K বৃদ্ধি করতে কৃত কাজ কত (সমচাপ প্রক্রিয়ায়)?</div>
             <div class="options-grid">
@@ -1080,39 +1100,35 @@
               <label class="option-label"><input type="radio" name="q30" value="D"> 0</label>
             </div>
             <div class="solution-notes">
-              <h4>ব্যাখ্যা ও সমাধান:</h4>
-              • \( dW = P \cdot dV = nR \cdot dT \)<br/>
-              • \( n = 1 \) mole এবং \( dT = 1\text{ K} \) বসালে কৃতকাজ = <span class="highlight">R</span> (সার্বজনীন গ্যাস ধ্রুবক)।
+              \( dW = P \cdot dV = nR \cdot dT \)<br/>
+              \( n = 1 \) mole এবং \( dT = 1\text{ K} \) বসালে কৃতকাজ = <span class="highlight">R</span> (সার্বজনীন গ্যাস ধ্রুবক)।
             </div>
           </div>
 
         </form>
       </div>
 
-      <div style="padding: 20px; text-align: center; background: #fff; border-top: 1px solid #e2e8f0;">
-        <button class="btn btn-primary" style="max-width: 300px; font-size: 1.1rem; border-radius: 30px; padding: 14px;" onclick="submitExam()">পরীক্ষা জমা দিন</button>
+      <div style="padding: 20px; text-align: center;">
+        <button class="btn btn-primary" style="max-width: 300px; font-size: 1.1rem; padding: 14px;" onclick="submitExam()">পরীক্ষা জমা দিন</button>
       </div>
     </div>
 
     <!-- ৩. ফলাফল ও রিভিউ স্ক্রিন -->
     <div id="resultArea" class="screen-section" style="display: none;">
       <div class="result-summary">
-        <h3 style="color: #0f172a; margin-bottom: 5px;">পরীক্ষা সম্পন্ন ও ফলাফল সংরক্ষিত হয়েছে!</h3>
-        <p style="color: #64748b; font-size: 0.9rem;">আপনার প্রাপ্ত নম্বর:</p>
-        <div class="score-badge"><span id="scoreDisplayVal">0</span> <span style="font-size: 1.2rem; color: #64748b;">/ ৩০</span></div>
-        <p style="font-size: 0.9rem; font-weight: 600; color: #0038a8; margin-top: 5px;">আপনার অবস্থান: <span id="userRankVal">-</span></p>
+        <h3 style="color: var(--text-main); margin-bottom: 5px;">ফলাফল সংরক্ষিত হয়েছে!</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">আপনার প্রাপ্ত নম্বর:</p>
+        <div class="score-badge"><span id="scoreDisplayVal">0</span> <span style="font-size: 1.2rem; color: var(--text-muted);">/ ৩০</span></div>
+        <p style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-top: 5px;">আপনার অবস্থান: <span id="userRankVal" style="color: var(--primary-color);">-</span></p>
         
-        <!-- প্র্যাকটিস মোডের জন্য রিটেক বাটন -->
-        <button id="retakeBtn" class="btn btn-primary" style="display:none; margin-top: 15px; width: auto;" onclick="retakePracticeExam()">আবার প্র্যাকটিস করুন 🔄</button>
+        <button id="retakeBtn" class="btn btn-primary" style="display:none; margin-top: 20px; width: auto;" onclick="retakePracticeExam()">আবার প্র্যাকটিস করুন 🔄</button>
       </div>
 
-      <!-- ন্যাভিগেশন ট্যাব -->
       <div class="nav-tabs">
         <button id="tabLbBtn" class="tab-btn active" onclick="switchTab('leaderboard')">🏆 লিডারবোর্ড</button>
         <button id="tabReviewBtn" class="tab-btn" onclick="switchTab('review')">📝 উত্তর পর্যালোচনা</button>
       </div>
 
-      <!-- ট্যাব ১: লিডারবোর্ড -->
       <div id="leaderboardTabContent">
         <div class="lb-container">
           <table>
@@ -1130,15 +1146,13 @@
         </div>
       </div>
 
-      <!-- ট্যাব ২: উত্তর পর্যালোচনা -->
-      <div id="reviewTabContent" class="notebook-paper" style="display: none;">
+      <div id="reviewTabContent" style="display: none; padding-bottom: 30px;">
       </div>
     </div>
 
-    <!-- গোল্ডেন ও ব্ল্যাক শেড ফুটার -->
     <div class="footer-notice">
-     <span class="golden-text">Developed by Rimit</span> <br>
-      <span class="golden-text">Exam Question:Made by Rimit</span>
+     Developed by Rimit <br>
+     <span style="font-size: 0.8rem; font-weight: 400;">Exam Question: Made by Rimit</span>
     </div>
   </div>
 
